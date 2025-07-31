@@ -14,7 +14,7 @@ const program = new Command();
 program
   .name("ghevents")
   .description("CLI tool to fetch GitHub events and export to XML")
-  .version("0.3.0")
+  .version("0.4.0")
   .option("-t, --github-token <token>", "GitHub access token")
   .option("-o, --output <file>", "Output file name", "./ghevents.xml")
   .option("-s, --since <date>", "Start date in ISO8601 format")
