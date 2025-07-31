@@ -72,18 +72,6 @@ interface ReviewNode extends BaseNode {
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
 }
 
-interface CommitNode {
-  oid: string;
-  message: string;
-  url: string;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  committedDate: string;
-  repository: Repository;
-  author: { user?: GitHubUser };
-}
-
 export class GitHubService {
   private graphqlWithAuth: typeof graphql;
 
@@ -152,10 +140,12 @@ export class GitHubService {
     username: string,
     options: ParsedCliOptions,
   ): Promise<GitHubEventUnion[]> {
+    const sinceDate = options.since.toISOString().split("T")[0];
+    const untilDate = options.until.toISOString().split("T")[0];
     const query = `
-      query($username: String!, $since: DateTime!, $until: DateTime!, $after: String) {
+      query($after: String) {
         search(
-          query: "author:$username is:issue created:$since..$until"
+          query: "author:${username} is:issue created:${sinceDate}..${untilDate}"
           type: ISSUE
           first: 100
           after: $after
@@ -196,47 +186,40 @@ export class GitHubService {
       }
     `;
 
-    return this.fetchPaginatedData(
-      query,
-      {
-        username,
-        since: options.since.toISOString(),
-        until: options.until.toISOString(),
+    return this.fetchPaginatedData(query, {}, options.visibility, (node: IssueNode) => ({
+      type: "Issue" as const,
+      number: node.number,
+      title: node.title,
+      body: node.body,
+      url: node.url,
+      state: node.state,
+      createdAt: node.createdAt,
+      labels: node.labels.nodes.map((label: Label) => ({
+        name: label.name,
+        color: label.color,
+      })),
+      repository: {
+        name: node.repository.name,
+        owner: node.repository.owner.login,
+        url: node.repository.url,
       },
-      options.visibility,
-      (node: IssueNode) => ({
-        type: "Issue" as const,
-        number: node.number,
-        title: node.title,
-        body: node.body,
-        url: node.url,
-        state: node.state,
-        createdAt: node.createdAt,
-        labels: node.labels.nodes.map((label: Label) => ({
-          name: label.name,
-          color: label.color,
-        })),
-        repository: {
-          name: node.repository.name,
-          owner: node.repository.owner.login,
-          url: node.repository.url,
-        },
-        author: {
-          login: node.author.login,
-          url: node.author.url,
-        },
-      }),
-    );
+      author: {
+        login: node.author.login,
+        url: node.author.url,
+      },
+    }));
   }
 
   private async fetchIssueComments(
     username: string,
     options: ParsedCliOptions,
   ): Promise<GitHubEventUnion[]> {
+    const sinceDate = options.since.toISOString().split("T")[0];
+    const untilDate = options.until.toISOString().split("T")[0];
     const query = `
-      query($username: String!, $since: DateTime!, $until: DateTime!, $after: String) {
+      query($after: String) {
         search(
-          query: "commenter:$username is:issue-comment created:$since..$until"
+          query: "commenter:${username} is:issue-comment created:${sinceDate}..${untilDate}"
           type: ISSUE
           first: 100
           after: $after
@@ -248,7 +231,6 @@ export class GitHubService {
           nodes {
             ... on Issue {
               comments(
-                filterBy: { since: $since }
                 first: 100
               ) {
                 nodes {
@@ -280,11 +262,7 @@ export class GitHubService {
 
     const results = await this.fetchPaginatedData(
       query,
-      {
-        username,
-        since: options.since.toISOString(),
-        until: options.until.toISOString(),
-      },
+      {},
       options.visibility,
       (node: IssueNode) => {
         return node.comments.nodes
@@ -319,10 +297,12 @@ export class GitHubService {
     username: string,
     options: ParsedCliOptions,
   ): Promise<GitHubEventUnion[]> {
+    const sinceDate = options.since.toISOString().split("T")[0];
+    const untilDate = options.until.toISOString().split("T")[0];
     const query = `
-      query($username: String!, $since: DateTime!, $until: DateTime!, $after: String) {
+      query($after: String) {
         search(
-          query: "author:$username is:pr created:$since..$until"
+          query: "author:${username} is:pr created:${sinceDate}..${untilDate}"
           type: ISSUE
           first: 100
           after: $after
@@ -362,48 +342,41 @@ export class GitHubService {
       }
     `;
 
-    return this.fetchPaginatedData(
-      query,
-      {
-        username,
-        since: options.since.toISOString(),
-        until: options.until.toISOString(),
+    return this.fetchPaginatedData(query, {}, options.visibility, (node: PullRequestNode) => ({
+      type: "PullRequest" as const,
+      number: node.number,
+      title: node.title,
+      body: node.body,
+      url: node.url,
+      state: node.state,
+      createdAt: node.createdAt,
+      baseRef: node.baseRefName,
+      headRef: node.headRefName,
+      changedFiles: node.changedFiles,
+      additions: node.additions,
+      deletions: node.deletions,
+      repository: {
+        name: node.repository.name,
+        owner: node.repository.owner.login,
+        url: node.repository.url,
       },
-      options.visibility,
-      (node: PullRequestNode) => ({
-        type: "PullRequest" as const,
-        number: node.number,
-        title: node.title,
-        body: node.body,
-        url: node.url,
-        state: node.state,
-        createdAt: node.createdAt,
-        baseRef: node.baseRefName,
-        headRef: node.headRefName,
-        changedFiles: node.changedFiles,
-        additions: node.additions,
-        deletions: node.deletions,
-        repository: {
-          name: node.repository.name,
-          owner: node.repository.owner.login,
-          url: node.repository.url,
-        },
-        author: {
-          login: node.author.login,
-          url: node.author.url,
-        },
-      }),
-    );
+      author: {
+        login: node.author.login,
+        url: node.author.url,
+      },
+    }));
   }
 
   private async fetchPullRequestReviews(
     username: string,
     options: ParsedCliOptions,
   ): Promise<GitHubEventUnion[]> {
+    const sinceDate = options.since.toISOString().split("T")[0];
+    const untilDate = options.until.toISOString().split("T")[0];
     const query = `
-      query($username: String!, $since: DateTime!, $until: DateTime!, $after: String) {
+      query($after: String) {
         search(
-          query: "reviewed-by:$username is:pr created:$since..$until"
+          query: "reviewed-by:${username} is:pr created:${sinceDate}..${untilDate}"
           type: ISSUE
           first: 100
           after: $after
@@ -416,7 +389,6 @@ export class GitHubService {
             ... on PullRequest {
               reviews(
                 first: 100
-                filterBy: { since: $since }
               ) {
                 nodes {
                   state
@@ -448,11 +420,7 @@ export class GitHubService {
 
     const results = await this.fetchPaginatedData(
       query,
-      {
-        username,
-        since: options.since.toISOString(),
-        until: options.until.toISOString(),
-      },
+      {},
       options.visibility,
       (node: PullRequestNode) => {
         return node.reviews.nodes
@@ -485,78 +453,12 @@ export class GitHubService {
   }
 
   private async fetchCommits(
-    username: string,
-    options: ParsedCliOptions,
+    _username: string,
+    _options: ParsedCliOptions,
   ): Promise<GitHubEventUnion[]> {
-    const query = `
-      query($username: String!, $since: DateTime!, $until: DateTime!, $after: String) {
-        search(
-          query: "author:$username is:commit author-date:$since..$until"
-          type: COMMIT
-          first: 100
-          after: $after
-        ) {
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-          nodes {
-            ... on Commit {
-              oid
-              message
-              url
-              additions
-              deletions
-              changedFiles
-              committedDate
-              repository {
-                name
-                owner {
-                  login
-                }
-                url
-                visibility
-              }
-              author {
-                user {
-                  login
-                  url
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    return this.fetchPaginatedData(
-      query,
-      {
-        username,
-        since: options.since.toISOString(),
-        until: options.until.toISOString(),
-      },
-      options.visibility,
-      (node: CommitNode) => ({
-        type: "Commit" as const,
-        sha: node.oid,
-        message: node.message,
-        url: node.url,
-        additions: node.additions,
-        deletions: node.deletions,
-        changedFiles: node.changedFiles,
-        createdAt: node.committedDate,
-        repository: {
-          name: node.repository.name,
-          owner: node.repository.owner.login,
-          url: node.repository.url,
-        },
-        author: {
-          login: node.author.user?.login || username,
-          url: node.author.user?.url || "",
-        },
-      }),
-    );
+    // GitHub's search API doesn't support searching commits directly
+    // We'll return an empty array for now, or implement repository-specific commit fetching
+    return [];
   }
 
   private async fetchPaginatedData<T, N>(

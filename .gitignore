@@ -216,3 +216,5 @@ test-*
 **/.augmentignore
 **/.augment/rules/
 **/.augment-guidelines
+
+ghevents.xml
