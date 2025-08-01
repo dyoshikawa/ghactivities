@@ -72,6 +72,31 @@ interface ReviewNode extends BaseNode {
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
 }
 
+interface ContributionsByRepository {
+  repository: Repository;
+  contributions: {
+    nodes: Array<{
+      commitCount: number;
+      occurredAt: string;
+    }>;
+  };
+}
+
+interface CommitNode {
+  oid: string;
+  message: string;
+  committedDate: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  url: string;
+  author: {
+    user?: GitHubUser;
+    name: string;
+    email: string;
+  };
+}
+
 export class GitHubService {
   private graphqlWithAuth: typeof graphql;
 
@@ -453,12 +478,204 @@ export class GitHubService {
   }
 
   private async fetchCommits(
-    _username: string,
-    _options: ParsedCliOptions,
+    username: string,
+    options: ParsedCliOptions,
   ): Promise<GitHubEventUnion[]> {
-    // GitHub's search API doesn't support searching commits directly
-    // We'll return an empty array for now, or implement repository-specific commit fetching
-    return [];
+    const commits: GitHubEventUnion[] = [];
+
+    // Split the date range into 1-year periods to handle GitHub's limitation
+    const periods = this.splitDateRangeIntoYearPeriods(options.since, options.until);
+
+    for (const period of periods) {
+      const contributionsByRepo = await this.fetchCommitContributions(period.from, period.to);
+
+      for (const repoContrib of contributionsByRepo) {
+        if (this.shouldIncludeByVisibility(repoContrib.repository.visibility, options.visibility)) {
+          const repoCommits = await this.fetchDetailedCommitsFromRepository(
+            repoContrib.repository.owner.login,
+            repoContrib.repository.name,
+            username,
+            period.from,
+            period.to,
+          );
+          commits.push(...repoCommits);
+        }
+      }
+    }
+
+    return commits;
+  }
+
+  private async fetchCommitContributions(
+    from: Date,
+    to: Date,
+  ): Promise<ContributionsByRepository[]> {
+    const query = `
+      query($from: DateTime!, $to: DateTime!) {
+        viewer {
+          contributionsCollection(from: $from, to: $to) {
+            commitContributionsByRepository(maxRepositories: 100) {
+              repository {
+                name
+                owner {
+                  login
+                }
+                url
+                visibility
+              }
+              contributions(first: 100) {
+                nodes {
+                  commitCount
+                  occurredAt
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response: {
+      viewer: {
+        contributionsCollection: {
+          commitContributionsByRepository: ContributionsByRepository[];
+        };
+      };
+    } = await this.graphqlWithAuth(query, {
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+
+    return response.viewer.contributionsCollection.commitContributionsByRepository;
+  }
+
+  private async fetchDetailedCommitsFromRepository(
+    owner: string,
+    name: string,
+    authorLogin: string,
+    since: Date,
+    until: Date,
+  ): Promise<GitHubEventUnion[]> {
+    const query = `
+      query($owner: String!, $name: String!, $since: GitTimestamp!, $until: GitTimestamp!, $after: String) {
+        repository(owner: $owner, name: $name) {
+          url
+          defaultBranchRef {
+            target {
+              ... on Commit {
+                history(since: $since, until: $until, first: 100, after: $after) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                  nodes {
+                    oid
+                    message
+                    committedDate
+                    additions
+                    deletions
+                    changedFiles
+                    url
+                    author {
+                      user {
+                        login
+                        url
+                      }
+                      name
+                      email
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const commits: GitHubEventUnion[] = [];
+    let hasNextPage = true;
+    let after: string | null = null;
+
+    while (hasNextPage) {
+      const response: {
+        repository: {
+          url: string;
+          defaultBranchRef: {
+            target: {
+              history: {
+                pageInfo: {
+                  hasNextPage: boolean;
+                  endCursor: string;
+                };
+                nodes: CommitNode[];
+              };
+            };
+          };
+        };
+      } = await this.graphqlWithAuth(query, {
+        owner,
+        name,
+        since: since.toISOString(),
+        until: until.toISOString(),
+        after,
+      });
+
+      const history = response.repository.defaultBranchRef?.target?.history;
+      if (!history) break;
+
+      hasNextPage = history.pageInfo.hasNextPage;
+      after = history.pageInfo.endCursor;
+
+      for (const commit of history.nodes) {
+        if (commit.author.user?.login === authorLogin) {
+          commits.push({
+            type: "Commit" as const,
+            sha: commit.oid,
+            message: commit.message,
+            createdAt: commit.committedDate,
+            additions: commit.additions,
+            deletions: commit.deletions,
+            changedFiles: commit.changedFiles,
+            url: commit.url,
+            repository: {
+              name,
+              owner,
+              url: response.repository.url,
+            },
+            author: {
+              login: commit.author.user.login,
+              url: commit.author.user.url,
+            },
+          });
+        }
+      }
+    }
+
+    return commits;
+  }
+
+  private splitDateRangeIntoYearPeriods(since: Date, until: Date): Array<{ from: Date; to: Date }> {
+    const periods: Array<{ from: Date; to: Date }> = [];
+    let currentFrom = new Date(since);
+
+    while (currentFrom < until) {
+      const currentTo = new Date(currentFrom);
+      currentTo.setFullYear(currentTo.getFullYear() + 1);
+
+      // Ensure we don't exceed the original until date
+      if (currentTo > until) {
+        currentTo.setTime(until.getTime());
+      }
+
+      periods.push({ from: new Date(currentFrom), to: new Date(currentTo) });
+
+      // Move to the next period
+      currentFrom = new Date(currentTo);
+      currentFrom.setMilliseconds(currentFrom.getMilliseconds() + 1);
+    }
+
+    return periods;
   }
 
   private async fetchPaginatedData<T, N>(
