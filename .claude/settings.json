@@ -1,45 +1,49 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
-    "allow": [
-      "Bash(git:*)",
-      "Bash(gh:*)",
-      "Bash(touch:*)",
-      "Bash(ls:*)",
-      "Bash(mkdir:*)",
-      "Bash(rg:*)",
-      "Bash(grep:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)",
-      "Bash(rm:*)",
-      "Read(**)",
-      "Edit(**)",
-      "MultiEdit(**)",
-      "WebFetch(domain:*)",
-      "WebSearch(domain:*)",
-      "Write(**)",
-      "Bash(node:*)",
-      "Bash(pnpm:*)",
-      "Bash(find:*)",
-      "WebFetch(domain:code.visualstudio.com)",
-      "WebFetch(domain:docs.cursor.com)",
-      "WebFetch(domain:docs.cline.bot)",
-      "WebFetch(domain:docs.roo.com)",
-      "WebFetch(domain:docs.claude.com)",
-      "WebFetch(domain:github.com)",
-      "Bash(gh release create:*)"
-    ],
     "deny": [
-      "Bash(rm -rf ~/)",
-      "Bash(rm -rf //)",
+      "Bash(rm -rf ~/**)",
+      "Bash(rm -rf //**)",
       "Bash(git remote add:*)",
       "Bash(git remote set-url:*)",
       "Bash(npm publish:*)",
-      "Bash(pnpm publish:*)"
+      "Bash(pnpm publish:*)",
+      "Bash(git commit --no-verify:*)"
     ],
+    "allow": ["mcp__serena", "mcp__modular-mcp"],
     "defaultMode": "acceptEdits"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "npx -y ccstatusline@latest",
+    "padding": 0
   },
   "env": {
     "BASH_DEFAULT_TIMEOUT_MS": "300000",
-    "BASH_MAX_TIMEOUT_MS": "1200000"
+    "BASH_MAX_TIMEOUT_MS": "1200000",
+    "DISABLE_AUTOUPDATER": "0",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "excludedCommands": ["docker", "git"],
+    "network": {
+      "allowUnixSockets": ["/var/run/docker.sock"],
+      "allowLocalBinding": true
+    },
+    "allowUnsandboxedCommands": false
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
   }
 }
