@@ -5,22 +5,23 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["src/**/*.test.ts"],
+    passWithNoTests: true,
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
       exclude: [
-        "src/**/*.test.ts", 
-        "src/cli/index.ts", 
+        "src/**/*.test.ts",
+        "src/cli/index.ts",
         "src/types/**/*.ts",
         "src/**/index.ts",
-        "src/services/github.ts"
+        "src/services/github.ts",
       ],
       thresholds: {
         statements: 80,
         branches: 80,
         functions: 80,
-        lines: 80
-      }
+        lines: 80,
+      },
     },
   },
 });

@@ -1,17 +1,30 @@
-new_version = get_version_without_v_prefix($ARGUMENTS) # example: 1.0.0
-new_version_with_v_prefix = get_version_with_v_prefix($ARGUMENTS) # example: v1.0.0
+---
+description: Release a new version of the project.
+---
+First, let's work on the following steps.
 
 1. Confirm that you are currently on the main branch. If not on main branch, abort this operation.
-2. Run `git pull`.
-3. Run `git checkout -b release/{new_version_with_v_prefix}`.
-4. Update the version in `src/cli/index.ts`. Then, execute `git add` and `git commit`.
-5. Update the version with `pnpm version {new_version} --no-git-tag-version`.
-6. Since `package.json` will be modified, execute `git commit` and `git push`.
-7. Run `gh pr create` and `gh pr merge --admin` to merge the release branch into the main branch.
-8. Compare code changes between the previous version tag and current commit to prepare the Release description.
-  - Write in English.
-  - Do not include confidential information.
-  - Sections, `What's Changed`, `Contributors` and `Full Changelog` are needed.
-  - `./tmp/release-notes.md` will be used as the release notes.
-9. As a precaution, verify that the release content does not contain any information that should remain private.
-10. Use the `gh release create {new_version_with_v_prefix} --title {new_version_with_v_prefix} --notes-file ./tmp/release-notes.md ...` command to create a Release on the `github.com/dyoshikawa/ghevents` repository with both title and tag set to new_version_with_v_prefix, using the content from step 4 as the description.
+2. Compare code changes between the previous version tag and the latest commit to prepare the release description.
+
+- Write in English.
+- Do not include confidential information.
+- Sections, `What's Changed`, `Contributors` and `Full Changelog` are needed.
+- `./ai-tmp/release-notes.md` will be used as the release notes.
+
+Then, from $ARGUMENTS, get the new version without v prefix, and assign it to $new_version. For example, if $ARGUMENTS is "v1.0.0", the new version is "1.0.0".
+
+Unless the user does not explicitly specify the new version, please judge the new version from the release description with the following the general semantic versioning rules.
+
+Let's resume the release process.
+
+3. Run `git pull`.
+4. Run `git checkout -b release/v${new_version}`.
+5. Update `getVersion()` function to return the ${new_version} in `src/cli/index.ts`, and run `pnpm cicheck:code`. If the checks fail, fix the code until pass. Then, execute `git add` and `git commit`.
+6. Update the version with `pnpm version ${new_version} --no-git-tag-version`.
+7. Since `package.json` will be modified, execute `git commit` and `git push`.
+8. Run `gh pr create` and `gh pr merge --admin` to merge the release branch into the main branch.
+9. As a precaution, verify that `getVersion()` in `src/cli/index.ts` is updated to the ${new_version}.
+10. Create a **draft** release using `gh release create v${new_version} --draft --title v${new_version} --notes-file ./ai-tmp/release-notes.md` command on the `github.com/dyoshikawa/rulesync` repository. This creates a draft release so that the release-assets workflow can upload assets.
+11. Wait for the release-assets workflow to complete successfully. Use `gh run list --workflow="Release Assets" --branch v${new_version} --limit 1 --json status,conclusion,databaseId` to check the status. Poll until the workflow completes (status is "completed"). If it fails, abort the release process and report the failure.
+12. Once the release-assets workflow succeeds, publish the release by running `gh release edit v${new_version} --draft=false`.
+13. Clean up the branches. Run `git checkout main`, `git branch -D release/v${new_version}` and `git pull --prune`.

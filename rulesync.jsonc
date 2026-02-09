@@ -1,19 +1,7 @@
 {
-  "targets": [
-    "claudecode",
-    "opencode"
-  ],
-  "features": [
-    "rules",
-    "ignore",
-    "mcp",
-    "commands",
-    "subagents",
-    "skills",
-  ],
-  "baseDirs": [
-    "."
-  ],
+  "targets": ["claudecode", "opencode"],
+  "features": ["rules", "ignore", "mcp", "commands", "subagents", "skills"],
+  "baseDirs": ["."],
   "delete": true,
   "verbose": false,
   "silent": false,
@@ -21,5 +9,5 @@
   "simulateCommands": false,
   "simulateSubagents": false,
   "simulateSkills": false,
-  "modularMcp": false
+  "modularMcp": false,
 }

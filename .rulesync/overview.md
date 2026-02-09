@@ -1,6 +1,6 @@
 ---
 root: true
-targets: ['*']
+targets: ["*"]
 description: "project overview and architecture guide"
 globs: ["**/*"]
 ---
