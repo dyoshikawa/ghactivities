@@ -189,6 +189,10 @@
     "mnda",
     "pdfplumber",
     "OOXML",
-    "oxfmt"
+    "oxfmt",
+    "BKMG",
+    "omnisharp",
+    "rego",
+    "solargraph"
   ]
 }

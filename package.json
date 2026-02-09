@@ -57,8 +57,10 @@
 		"pre-commit": "pnpm exec lint-staged"
 	},
 	"dependencies": {
+		"@clack/prompts": "1.0.0",
 		"@octokit/graphql": "9.0.3",
-		"@octokit/rest": "22.0.1"
+		"@octokit/rest": "22.0.1",
+		"zod": "4.3.6"
 	},
 	"devDependencies": {
 		"@secretlint/secretlint-rule-preset-recommend": "11.3.1",
