@@ -33,28 +33,28 @@
 	],
 	"scripts": {
 		"build": "tsup",
-		"check": "pnpm run fmt:check && pnpm run oxlint && pnpm run typecheck",
-		"cicheck": "pnpm run cicheck:code && pnpm run cicheck:content",
-		"cicheck:code": "pnpm run check && pnpm run test",
-		"cicheck:content": "pnpm run cspell && pnpm run secretlint",
+		"check": "bun run fmt:check && bun run oxlint && bun run typecheck",
+		"cicheck": "bun run cicheck:code && bun run cicheck:content",
+		"cicheck:code": "bun run check && bun run test",
+		"cicheck:content": "bun run cspell && bun run secretlint",
 		"cspell": "cspell --no-progress --gitignore .",
-		"dev": "tsx src/cli/index.ts",
-		"fix": "pnpm run fmt && pnpm run oxlint:fix",
+		"dev": "bun run src/cli/index.ts",
+		"fix": "bun run fmt && bun run oxlint:fix",
 		"fmt": "oxfmt .",
 		"fmt:check": "oxfmt --check .",
 		"oxlint": "oxlint . --max-warnings 0",
 		"oxlint:fix": "oxlint . --fix --max-warnings 0",
-		"prepublishOnly": "pnpm build",
+		"prepublishOnly": "bun run build",
 		"secretlint": "secretlint --secretlintignore .gitignore \"**/*\"",
 		"sort": "sort-package-json",
 		"test": "vitest run --silent",
 		"test:coverage": "vitest run --coverage --silent",
 		"test:watch": "vitest --silent",
 		"typecheck": "tsgo --noEmit",
-		"prepare": "simple-git-hooks && npx rulesync generate"
+		"prepare": "simple-git-hooks && bunx rulesync generate"
 	},
 	"simple-git-hooks": {
-		"pre-commit": "pnpm exec lint-staged"
+		"pre-commit": "bunx lint-staged"
 	},
 	"dependencies": {
 		"@clack/prompts": "1.0.0",
@@ -80,7 +80,6 @@
 		"typescript": "5.9.3",
 		"vitest": "4.0.18"
 	},
-	"packageManager": "pnpm@10.12.2",
 	"engines": {
 		"node": ">=20.0.0"
 	},

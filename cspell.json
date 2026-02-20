@@ -1,12 +1,5 @@
 {
-  "ignorePaths": [
-    "coverage/**",
-    "dist/**",
-    "pnpm-lock.yaml",
-    "node_modules/**",
-    ".git/**",
-    ".gitignore"
-  ],
+  "ignorePaths": ["coverage/**", "dist/**", "bun.lock", "node_modules/**", ".git/**", ".gitignore"],
   "words": [
     "agentrequested",
     "aiexclude",
@@ -193,6 +186,7 @@
     "BKMG",
     "omnisharp",
     "rego",
-    "solargraph"
+    "solargraph",
+    "bunx"
   ]
 }
