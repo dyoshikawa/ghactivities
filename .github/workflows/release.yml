@@ -1,5 +1,8 @@
 name: Release
 
+permissions:
+  contents: write
+
 on:
   release:
     types: [created]
@@ -52,9 +55,7 @@ jobs:
         shell: bash
 
       - name: Upload release asset (npm tarball)
-        uses: actions/upload-release-asset@v3
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ${{ steps.pack.outputs.tarball }}
-          asset_name: ghactivities-${{ steps.pack.outputs.version }}.tgz
-          asset_content_type: application/gzip
+          files: ${{ steps.pack.outputs.tarball }}
+          fail_on_unmatched_files: true
