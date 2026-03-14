@@ -6,7 +6,7 @@ on:
 
 jobs:
   publish:
-    name: Publish to NPM
+    name: Publish to NPM and upload release assets
     runs-on: ubuntu-latest
 
     steps:
@@ -40,3 +40,21 @@ jobs:
         run: pnpm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Pack npm package for release
+        id: pack
+        run: |
+          # Read version from package.json and create a tarball via npm pack (pnpm pack is supported)
+          version=$(node -p "require('./package.json').version")
+          tarball=$(pnpm pack)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Upload release asset (npm tarball)
+        uses: actions/upload-release-asset@v3
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ steps.pack.outputs.tarball }}
+          asset_name: ghactivities-${{ steps.pack.outputs.version }}.tgz
+          asset_content_type: application/gzip
