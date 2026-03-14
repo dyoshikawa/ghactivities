@@ -23,7 +23,7 @@ jsonファイルで出力する。
 
 ## 技術選定
 
-- Node.js
-- TypeScript
-- octokit/graphql,octokit/rest
-- Clack (for cli)
+- Go
+- Go Modules
+- GitHub GraphQL API
+- Go標準CLI/テスト/ビルドツールチェーン
