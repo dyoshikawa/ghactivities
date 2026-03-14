@@ -5,38 +5,45 @@ on:
     types: [created]
 
 jobs:
-  publish:
-    name: Publish to NPM
+  build:
+    name: Build Release Binaries
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            asset_name: ghevents-linux-amd64
+          - goos: darwin
+            goarch: amd64
+            asset_name: ghevents-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            asset_name: ghevents-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            asset_name: ghevents-windows-amd64.exe
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          ref: main
+          go-version-file: go.mod
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+      - name: Run tests
+        run: go test ./...
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 10.12.2
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Run quality checks
-        run: |
-          pnpm check
-          pnpm secretlint
-          pnpm cspell
-          pnpm test
-
-      - name: Publish to npm
-        run: pnpm publish
+      - name: Build binary
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags="-s -w" -o ./dist/${{ matrix.asset_name }} ./cmd/ghevents
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ./dist/${{ matrix.asset_name }}
