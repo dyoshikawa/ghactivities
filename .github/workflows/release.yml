@@ -42,8 +42,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath -ldflags="-s -w" -o ./dist/${{ matrix.asset_name }} ./cmd/ghevents
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload asset to GitHub Release
+        uses: actions/upload-release-asset@v3
         with:
-          name: ${{ matrix.asset_name }}
-          path: ./dist/${{ matrix.asset_name }}
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dist/${{ matrix.asset_name }}
+          asset_name: ${{ matrix.asset_name }}
+          asset_content_type: application/octet-stream

@@ -42,6 +42,15 @@ go build -o ./bin/ghevents ./cmd/ghevents
 go test ./...
 ```
 
+## Release automation (Go release assets)
+
+- The release workflow builds binaries for configured platforms and attaches them to the GitHub Release as downloadable assets:
+- linux/amd64: ghevents-linux-amd64
+- darwin/amd64: ghevents-darwin-amd64
+- darwin/arm64: ghevents-darwin-arm64
+- windows/amd64: ghevents-windows-amd64.exe
+- These assets are uploaded automatically when a release is created on main.
+
 ## Design notes
 
 - The CLI uses the GitHub GraphQL API to preserve the existing event categories and output shape.
