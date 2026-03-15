@@ -1,67 +1,175 @@
 # ghactivities
 
-`ghactivities` is a Go CLI that collects GitHub activity for the authenticated user and writes compatible JSON event files.
+`ghactivities` is a Go CLI that exports your GitHub activity as JSON files. It authenticates as the current GitHub user, fetches supported event types from the GitHub GraphQL API, and writes machine-friendly output that can be archived, transformed, or imported into downstream tooling.
 
-## Supported events
+## What it collects
 
-- issues
-- issue comments
-- discussions
-- discussion comments
-- pull requests
-- pull request comments
-- commits
+`ghactivities` currently collects these event categories for the authenticated user:
 
-## Usage
+- issues you opened
+- issue comments you wrote
+- discussions you created
+- discussion comments you wrote
+- pull requests you opened
+- pull request comments you wrote
+- commits authored by you on default branches of repositories you contributed to during the selected time range
+
+Each JSON event includes the event type, creation timestamp, resource metadata, and repository owner/name/visibility.
+
+## Installation and build
+
+Run directly from the repository:
 
 ```bash
-go run ./cmd/ghactivities --output ./ghactivities.json
+go run ./cmd/ghactivities --help
 ```
 
-Options:
-
-- `--github-token`: GitHub access token. If omitted, `GITHUB_TOKEN` is used, then `gh auth token`.
-- `--output`: output path. Default: `./ghactivities.json`
-- `--since`: start date in ISO8601 format. Default: 2 weeks ago.
-- `--until`: end date in ISO8601 format. Default: now.
-- `--visibility`: `public`, `private`, or `all`. Default: `public`
-- `--max-length-size`: max JSON file size such as `1B`, `2K`, `2M`, `1.5M`. Default: `1M`
-- `--order`: `asc` or `desc`. Default: `asc`
-
-If the JSON output exceeds `--max-length-size`, files are split as `ghactivities_1.json`, `ghactivities_2.json`, and so on.
-
-## Build
+Build a local binary:
 
 ```bash
 go build -o ./bin/ghactivities ./cmd/ghactivities
 ```
 
-## Test
+Then run it with:
+
+```bash
+./bin/ghactivities --help
+```
+
+## Authentication
+
+`ghactivities` resolves credentials in this order:
+
+1. `--github-token`
+2. `GITHUB_TOKEN`
+3. `gh auth token`
+
+If you want to rely on GitHub CLI authentication, make sure `gh auth login` has already been completed on your machine.
+
+## Quick start
+
+Export the last 2 weeks of public activity to the default file:
+
+```bash
+go run ./cmd/ghactivities
+```
+
+Write to a custom file:
+
+```bash
+go run ./cmd/ghactivities --output ./out/ghactivities.json
+```
+
+Collect both public and private activity for a specific time window:
+
+```bash
+go run ./cmd/ghactivities \
+  --visibility all \
+  --since 2026-01-01T00:00:00Z \
+  --until 2026-01-31T23:59:59Z
+```
+
+Use an explicit token and reverse chronological ordering:
+
+```bash
+go run ./cmd/ghactivities \
+  --github-token "$GITHUB_TOKEN" \
+  --order desc
+```
+
+## CLI options
+
+```text
+--github-token      GitHub access token
+--output            Output file path (default: ./ghactivities.json)
+--since             Start date in ISO8601 format (default: 2 weeks ago)
+--until             End date in ISO8601 format (default: now)
+--visibility        Repository visibility: public, private, all (default: public)
+--max-length-size   Max output file size such as 1B, 2K, 2M (default: 1M)
+--order             Event order: asc, desc (default: asc)
+--help              Show help
+```
+
+Notes:
+
+- `--since` and `--until` must be valid RFC3339 / ISO8601 timestamps such as `2026-03-15T12:00:00Z`.
+- `--visibility private` limits results to repositories GitHub reports as private.
+- `--order asc` returns oldest-first output; `--order desc` returns newest-first output.
+
+## Output files and splitting
+
+By default, `ghactivities` writes a formatted JSON array to `./ghactivities.json`.
+
+If the rendered JSON exceeds `--max-length-size`, `ghactivities` automatically splits the result into numbered files that keep the same base name and extension:
+
+- `./ghactivities_1.json`
+- `./ghactivities_2.json`
+- `./ghactivities_3.json`
+
+For example:
+
+```bash
+go run ./cmd/ghactivities \
+  --output ./exports/activity.json \
+  --max-length-size 256K
+```
+
+This produces either `./exports/activity.json` or, when splitting is needed, files like `./exports/activity_1.json`, `./exports/activity_2.json`, and so on.
+
+## Development setup
+
+This repository uses `mise` to install toolchain dependencies.
+
+Install the pinned tools:
+
+```bash
+mise install
+```
+
+Install git hooks:
+
+```bash
+lefthook install
+```
+
+Current development tooling includes:
+
+- `go` for building and testing `ghactivities`
+- `lefthook` for local git hook management
+- `gitleaks` for secret scanning in the pre-commit hook
+
+The configured `pre-commit` hook runs `gitleaks` against staged changes and blocks commits if potential secrets are detected.
+
+## Testing and validation
+
+Run the test suite:
 
 ```bash
 go test ./...
 ```
 
-## Development setup
+Build the CLI:
 
 ```bash
-mise install
-lefthook install
+go build -o ./bin/ghactivities ./cmd/ghactivities
 ```
 
-After `lefthook install`, the `pre-commit` hook runs `gitleaks` against staged changes and blocks the commit if a secret is detected.
+Inspect the generated help text:
 
-## Release automation (Go release assets)
+```bash
+go run ./cmd/ghactivities --help
+```
 
-- The release workflow builds binaries for configured platforms and attaches them to the GitHub Release as downloadable assets:
-- linux/amd64: ghactivities-linux-amd64
-- darwin/amd64: ghactivities-darwin-amd64
-- darwin/arm64: ghactivities-darwin-arm64
-- windows/amd64: ghactivities-windows-amd64.exe
-- These assets are uploaded automatically when a release is created on main.
+## Release automation
 
-## Design notes
+GitHub Actions handles CI and release builds for `ghactivities`.
 
-- The CLI uses the GitHub GraphQL API to preserve the existing event categories and output shape.
-- Commit discovery first identifies contributed repositories from `contributionsCollection`, then reads default-branch commit history filtered by the authenticated viewer ID.
-- Comment collection intentionally follows the previous repository search semantics, including the parent-item search constraints used by the TypeScript implementation.
+- `.github/workflows/ci.yml` runs `go test ./...`, builds `./bin/ghactivities`, and verifies the binary exists on pushes and pull requests to `main`.
+- `.github/workflows/release.yml` runs tests and builds release binaries when a GitHub Release is created.
+- Release assets are published for `linux/amd64`, `darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
+
+## Implementation notes
+
+- `ghactivities` uses the GitHub GraphQL API.
+- Commit discovery first identifies contributed repositories from the user's contributions collection, then reads authored commits from each repository's default branch within the requested date range.
+- Output is written as JSON with stable file naming that preserves the requested output base path.
