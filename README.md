@@ -42,6 +42,15 @@ go build -o ./bin/ghevents ./cmd/ghevents
 go test ./...
 ```
 
+## Development setup
+
+```bash
+mise install
+lefthook install
+```
+
+After `lefthook install`, the `pre-commit` hook runs `gitleaks` against staged changes and blocks the commit if a secret is detected.
+
 ## Design notes
 
 - The CLI uses the GitHub GraphQL API to preserve the existing event categories and output shape.
