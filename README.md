@@ -42,13 +42,22 @@ go build -o ./bin/ghactivities ./cmd/ghactivities
 go test ./...
 ```
 
+## Development setup
+
+```bash
+mise install
+lefthook install
+```
+
+After `lefthook install`, the `pre-commit` hook runs `gitleaks` against staged changes and blocks the commit if a secret is detected.
+
 ## Release automation (Go release assets)
 
 - The release workflow builds binaries for configured platforms and attaches them to the GitHub Release as downloadable assets:
-- linux/amd64: ghevents-linux-amd64
-- darwin/amd64: ghevents-darwin-amd64
-- darwin/arm64: ghevents-darwin-arm64
-- windows/amd64: ghevents-windows-amd64.exe
+- linux/amd64: ghactivities-linux-amd64
+- darwin/amd64: ghactivities-darwin-amd64
+- darwin/arm64: ghactivities-darwin-arm64
+- windows/amd64: ghactivities-windows-amd64.exe
 - These assets are uploaded automatically when a release is created on main.
 
 ## Design notes
