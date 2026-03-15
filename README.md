@@ -60,6 +60,8 @@ Write to a custom file:
 go run ./cmd/ghactivities --output ./out/ghactivities.json
 ```
 
+`ghactivities` creates missing parent directories for the requested `--output` path before writing JSON files.
+
 Collect both public and private activity for a specific time window:
 
 ```bash
@@ -100,6 +102,8 @@ Notes:
 
 By default, `ghactivities` writes a formatted JSON array to `./ghactivities.json`.
 
+If the parent directories in `--output` do not exist yet, `ghactivities` creates them automatically.
+
 If the rendered JSON exceeds `--max-length-size`, `ghactivities` automatically splits the result into numbered files that keep the same base name and extension:
 
 - `./ghactivities_1.json`
@@ -115,6 +119,50 @@ go run ./cmd/ghactivities \
 ```
 
 This produces either `./exports/activity.json` or, when splitting is needed, files like `./exports/activity_1.json`, `./exports/activity_2.json`, and so on.
+
+Sample output:
+
+```json
+[
+  {
+    "type": "Issue",
+    "createdAt": "2026-01-05T09:12:33Z",
+    "title": "Document release process for ghactivities",
+    "url": "https://github.com/octo-org/ghactivities/issues/42",
+    "body": "Add the missing release checklist to the contributor docs.",
+    "repository": {
+      "owner": "octo-org",
+      "name": "ghactivities",
+      "visibility": "PUBLIC"
+    }
+  },
+  {
+    "type": "PullRequestComment",
+    "createdAt": "2026-01-08T14:48:10Z",
+    "prTitle": "Add support for export filtering",
+    "prUrl": "https://github.com/octo-org/ghactivities/pull/57",
+    "body": "Looks good overall. Please add coverage for empty export results.",
+    "url": "https://github.com/octo-org/ghactivities/pull/57#discussion_r1234567890",
+    "repository": {
+      "owner": "octo-org",
+      "name": "ghactivities",
+      "visibility": "PUBLIC"
+    }
+  },
+  {
+    "type": "Commit",
+    "createdAt": "2026-01-10T18:03:54Z",
+    "message": "Refine JSON export formatting for downstream tools",
+    "url": "https://github.com/octo-org/ghactivities/commit/1a2b3c4d5e6f7890abc1234567890def12345678",
+    "oid": "1a2b3c4d5e6f7890abc1234567890def12345678",
+    "repository": {
+      "owner": "octo-org",
+      "name": "ghactivities",
+      "visibility": "PUBLIC"
+    }
+  }
+]
+```
 
 ## Development setup
 
@@ -173,6 +221,7 @@ go run ./cmd/ghactivities --help
 GitHub Actions handles CI and release builds for `ghactivities`.
 
 - `.github/workflows/ci.yml` runs `go test ./...`, builds `./bin/ghactivities`, and verifies the binary exists on pushes and pull requests to `main`.
+- `.github/workflows/ci.yml` also runs `gitleaks` so secret scanning is enforced in CI.
 - `.github/workflows/release.yml` runs tests and builds release binaries when a GitHub Release is created.
 - Release assets are published for `linux/amd64`, `darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
 

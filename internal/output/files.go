@@ -12,6 +12,10 @@ import (
 )
 
 func WriteEventsToFiles(items []events.Event, output string, maxLengthSize int) ([]string, error) {
+	if err := ensureParentDir(output); err != nil {
+		return nil, err
+	}
+
 	content, err := marshalEvents(items)
 	if err != nil {
 		return nil, err
@@ -25,6 +29,15 @@ func WriteEventsToFiles(items []events.Event, output string, maxLengthSize int) 
 	}
 
 	return splitAndWriteFiles(items, output, maxLengthSize)
+}
+
+func ensureParentDir(output string) error {
+	dir := filepath.Dir(output)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	return nil
 }
 
 func splitAndWriteFiles(items []events.Event, output string, maxLengthSize int) ([]string, error) {

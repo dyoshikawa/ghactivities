@@ -60,6 +60,33 @@ func TestWriteEventsToFilesSplitsFiles(t *testing.T) {
 	}
 }
 
+func TestWriteEventsToFilesCreatesParentDirectories(t *testing.T) {
+	tempDir := t.TempDir()
+	outputPath := filepath.Join(tempDir, "nested", "exports", "events.json")
+	items := []events.Event{makeIssueEvent(1)}
+
+	files, err := WriteEventsToFiles(items, outputPath, 1024*1024)
+	if err != nil {
+		t.Fatalf("WriteEventsToFiles returned error: %v", err)
+	}
+
+	if len(files) != 1 || files[0] != outputPath {
+		t.Fatalf("files = %v, want [%s]", files, outputPath)
+	}
+
+	if _, err := os.Stat(filepath.Dir(outputPath)); err != nil {
+		t.Fatalf("Stat returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if len(content) == 0 {
+		t.Fatal("content is empty")
+	}
+}
+
 func TestWriteEventsToFilesEmptyArray(t *testing.T) {
 	tempDir := t.TempDir()
 	outputPath := filepath.Join(tempDir, "events.json")
