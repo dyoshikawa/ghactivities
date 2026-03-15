@@ -9,3 +9,11 @@ pnpm = "10.28.1"
 python = "3"
 rust = "latest"
 uv = "latest"
+
+[tasks.setup]
+description = "Install tools, tidy Go modules, and install git hooks"
+run = """
+mise install
+go mod tidy
+lefthook install
+"""
