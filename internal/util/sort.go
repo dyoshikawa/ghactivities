@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dyoshikawa/ghevents/internal/events"
+	"github.com/dyoshikawa/ghactivities/internal/events"
 )
 
 func SortEvents(items []events.Event, order string) []events.Event {

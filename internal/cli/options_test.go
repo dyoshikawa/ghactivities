@@ -52,8 +52,8 @@ func TestParseArgsUsesDefaults(t *testing.T) {
 		t.Fatalf("ParseArgs returned error: %v", err)
 	}
 
-	if result.Output != "./ghevents.json" {
-		t.Fatalf("Output = %q, want %q", result.Output, "./ghevents.json")
+	if result.Output != "./ghactivities.json" {
+		t.Fatalf("Output = %q, want %q", result.Output, "./ghactivities.json")
 	}
 	if result.Visibility != "public" {
 		t.Fatalf("Visibility = %q, want %q", result.Visibility, "public")

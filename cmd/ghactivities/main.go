@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/dyoshikawa/ghevents/internal/cli"
-	gh "github.com/dyoshikawa/ghevents/internal/github"
-	"github.com/dyoshikawa/ghevents/internal/output"
-	"github.com/dyoshikawa/ghevents/internal/util"
+	"github.com/dyoshikawa/ghactivities/internal/cli"
+	gh "github.com/dyoshikawa/ghactivities/internal/github"
+	"github.com/dyoshikawa/ghactivities/internal/output"
+	"github.com/dyoshikawa/ghactivities/internal/util"
 )
 
 func main() {
