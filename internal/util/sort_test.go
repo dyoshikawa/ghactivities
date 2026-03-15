@@ -3,7 +3,7 @@ package util
 import (
 	"testing"
 
-	"github.com/dyoshikawa/ghevents/internal/events"
+	"github.com/dyoshikawa/ghactivities/internal/events"
 )
 
 func TestSortEvents(t *testing.T) {

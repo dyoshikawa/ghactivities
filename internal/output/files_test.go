@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dyoshikawa/ghevents/internal/events"
+	"github.com/dyoshikawa/ghactivities/internal/events"
 )
 
 func TestWriteEventsToFilesSingleFile(t *testing.T) {

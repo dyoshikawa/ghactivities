@@ -1,4 +1,4 @@
-name: Release
+name: ghactivities Release
 
 on:
   release:
@@ -6,23 +6,23 @@ on:
 
 jobs:
   build:
-    name: Build Release Binaries
+    name: Build ghactivities Release Binaries
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goos: linux
             goarch: amd64
-            asset_name: ghevents-linux-amd64
+            asset_name: ghactivities-linux-amd64
           - goos: darwin
             goarch: amd64
-            asset_name: ghevents-darwin-amd64
+            asset_name: ghactivities-darwin-amd64
           - goos: darwin
             goarch: arm64
-            asset_name: ghevents-darwin-arm64
+            asset_name: ghactivities-darwin-arm64
           - goos: windows
             goarch: amd64
-            asset_name: ghevents-windows-amd64.exe
+            asset_name: ghactivities-windows-amd64.exe
 
     steps:
       - name: Checkout code
@@ -36,11 +36,11 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Build binary
+      - name: Build ghactivities binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags="-s -w" -o ./dist/${{ matrix.asset_name }} ./cmd/ghevents
+        run: go build -trimpath -ldflags="-s -w" -o ./dist/${{ matrix.asset_name }} ./cmd/ghactivities
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

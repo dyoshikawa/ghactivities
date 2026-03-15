@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dyoshikawa/ghevents/internal/events"
+	"github.com/dyoshikawa/ghactivities/internal/events"
 )
 
 func WriteEventsToFiles(items []events.Event, output string, maxLengthSize int) ([]string, error) {
