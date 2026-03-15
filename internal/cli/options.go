@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dyoshikawa/ghevents/internal/util"
+	"github.com/dyoshikawa/ghactivities/internal/util"
 )
 
 var ErrHelp = errors.New("help requested")
@@ -25,7 +25,7 @@ type Options struct {
 
 func ParseArgs(argv []string, now func() time.Time) (Options, error) {
 	defaults := defaultOptions(now)
-	fs := flag.NewFlagSet("ghevents", flag.ContinueOnError)
+	fs := flag.NewFlagSet("ghactivities", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
 	githubToken := fs.String("github-token", defaults.GitHubToken, "GitHub access token")
@@ -83,11 +83,11 @@ func ParseArgs(argv []string, now func() time.Time) (Options, error) {
 }
 
 func HelpText() string {
-	return strings.TrimLeft(`Usage: ghevents [options]
+	return strings.TrimLeft(`Usage: ghactivities [options]
 
 Options:
   --github-token      GitHub access token (env: GITHUB_TOKEN or "gh auth token")
-  --output            Output file path (default: ./ghevents.json)
+  --output            Output file path (default: ./ghactivities.json)
   --since             Start date in ISO8601 format (default: 2 weeks ago)
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
@@ -100,7 +100,7 @@ Options:
 func defaultOptions(now func() time.Time) Options {
 	current := now().UTC()
 	return Options{
-		Output:        "./ghevents.json",
+		Output:        "./ghactivities.json",
 		Since:         current.AddDate(0, 0, -14),
 		Until:         current,
 		Visibility:    "public",

@@ -1,6 +1,6 @@
-# ghevents
+# ghactivities
 
-`ghevents` is a Go CLI that collects GitHub activity for the authenticated user and writes compatible JSON event files.
+`ghactivities` is a Go CLI that collects GitHub activity for the authenticated user and writes compatible JSON event files.
 
 ## Supported events
 
@@ -15,25 +15,25 @@
 ## Usage
 
 ```bash
-go run ./cmd/ghevents --output ./ghevents.json
+go run ./cmd/ghactivities --output ./ghactivities.json
 ```
 
 Options:
 
 - `--github-token`: GitHub access token. If omitted, `GITHUB_TOKEN` is used, then `gh auth token`.
-- `--output`: output path. Default: `./ghevents.json`
+- `--output`: output path. Default: `./ghactivities.json`
 - `--since`: start date in ISO8601 format. Default: 2 weeks ago.
 - `--until`: end date in ISO8601 format. Default: now.
 - `--visibility`: `public`, `private`, or `all`. Default: `public`
 - `--max-length-size`: max JSON file size such as `1B`, `2K`, `2M`, `1.5M`. Default: `1M`
 - `--order`: `asc` or `desc`. Default: `asc`
 
-If the JSON output exceeds `--max-length-size`, files are split as `ghevents_1.json`, `ghevents_2.json`, and so on.
+If the JSON output exceeds `--max-length-size`, files are split as `ghactivities_1.json`, `ghactivities_2.json`, and so on.
 
 ## Build
 
 ```bash
-go build -o ./bin/ghevents ./cmd/ghevents
+go build -o ./bin/ghactivities ./cmd/ghactivities
 ```
 
 ## Test

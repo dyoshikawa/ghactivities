@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dyoshikawa/ghevents/internal/events"
-	"github.com/dyoshikawa/ghevents/internal/util"
+	"github.com/dyoshikawa/ghactivities/internal/events"
+	"github.com/dyoshikawa/ghactivities/internal/util"
 )
 
 const graphQLEndpoint = "https://api.github.com/graphql"
