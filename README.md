@@ -118,17 +118,25 @@ This produces either `./exports/activity.json` or, when splitting is needed, fil
 
 ## Development setup
 
-This repository uses `mise` to install toolchain dependencies.
+This repository uses `mise` for contributor setup and toolchain management.
 
-Install the pinned tools:
+Recommended first command for contributors:
+
+```bash
+mise run setup
+```
+
+`mise run setup` keeps local setup to one command by:
+
+- installing the pinned tools with `mise install`
+- running `go mod tidy` to sync Go module dependencies
+- installing the local git hooks with `lefthook install`
+
+If you need to run the steps manually:
 
 ```bash
 mise install
-```
-
-Install git hooks:
-
-```bash
+go mod tidy
 lefthook install
 ```
 
