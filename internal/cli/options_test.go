@@ -16,6 +16,7 @@ func TestParseArgsParsesAllOptions(t *testing.T) {
 		"--until", "2024-06-01T00:00:00Z",
 		"--visibility", "all",
 		"--max-length-size", "2M",
+		"--max-tokens", "1234",
 		"--order", "desc",
 	}, now)
 	if err != nil {
@@ -40,6 +41,9 @@ func TestParseArgsParsesAllOptions(t *testing.T) {
 	if result.MaxLengthSize != 2*1024*1024 {
 		t.Fatalf("MaxLengthSize = %d, want %d", result.MaxLengthSize, 2*1024*1024)
 	}
+	if result.MaxTokens != 1234 {
+		t.Fatalf("MaxTokens = %d, want %d", result.MaxTokens, 1234)
+	}
 	if result.Order != "desc" {
 		t.Fatalf("Order = %q, want %q", result.Order, "desc")
 	}
@@ -60,6 +64,9 @@ func TestParseArgsUsesDefaults(t *testing.T) {
 	}
 	if result.MaxLengthSize != 1024*1024 {
 		t.Fatalf("MaxLengthSize = %d, want %d", result.MaxLengthSize, 1024*1024)
+	}
+	if result.MaxTokens != 0 {
+		t.Fatalf("MaxTokens = %d, want %d", result.MaxTokens, 0)
 	}
 	if result.Order != "asc" {
 		t.Fatalf("Order = %q, want %q", result.Order, "asc")
@@ -83,6 +90,7 @@ func TestParseArgsRejectsInvalidValues(t *testing.T) {
 		{name: "order", argv: []string{"--order", "random"}},
 		{name: "since", argv: []string{"--since", "not-a-date"}},
 		{name: "size", argv: []string{"--max-length-size", "abc"}},
+		{name: "tokens", argv: []string{"--max-tokens", "-1"}},
 	}
 
 	for _, tt := range tests {

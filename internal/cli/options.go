@@ -20,6 +20,7 @@ type Options struct {
 	Until         time.Time
 	Visibility    string
 	MaxLengthSize int
+	MaxTokens     int
 	Order         string
 }
 
@@ -34,6 +35,7 @@ func ParseArgs(argv []string, now func() time.Time) (Options, error) {
 	until := fs.String("until", defaults.Until.Format(time.RFC3339Nano), "End date in ISO8601 format")
 	visibility := fs.String("visibility", defaults.Visibility, "Repository visibility")
 	maxLengthSize := fs.String("max-length-size", fmt.Sprintf("%dB", defaults.MaxLengthSize), "Max output file size")
+	maxTokens := fs.Int("max-tokens", defaults.MaxTokens, "Max output file tokens")
 	order := fs.String("order", defaults.Order, "Event order")
 	help := fs.Bool("help", false, "Show help")
 
@@ -71,6 +73,10 @@ func ParseArgs(argv []string, now func() time.Time) (Options, error) {
 		return Options{}, fmt.Errorf("invalid value for --max-length-size: %w", err)
 	}
 
+	if *maxTokens < 0 {
+		return Options{}, fmt.Errorf("invalid value for --max-tokens: must be 0 or greater")
+	}
+
 	return Options{
 		GitHubToken:   *githubToken,
 		Output:        *output,
@@ -78,6 +84,7 @@ func ParseArgs(argv []string, now func() time.Time) (Options, error) {
 		Until:         parsedUntil,
 		Visibility:    *visibility,
 		MaxLengthSize: parsedSize,
+		MaxTokens:     *maxTokens,
 		Order:         *order,
 	}, nil
 }
@@ -92,6 +99,7 @@ Options:
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
   --max-length-size   Max output file size: e.g. 1B, 2K, 2M (default: 1M)
+  --max-tokens        Max output file tokens from rendered JSON (default: 0, disabled)
   --order             Event order: asc, desc (default: asc)
   --help              Show this help message
 `, "\n")
@@ -105,6 +113,7 @@ func defaultOptions(now func() time.Time) Options {
 		Until:         current,
 		Visibility:    "public",
 		MaxLengthSize: 1024 * 1024,
+		MaxTokens:     0,
 		Order:         "asc",
 	}
 }
