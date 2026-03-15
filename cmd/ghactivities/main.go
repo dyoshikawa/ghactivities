@@ -51,7 +51,7 @@ func run(
 	}
 
 	sorted := util.SortEvents(events, options.Order)
-	files, err := output.WriteEventsToFiles(sorted, options.Output, options.MaxLengthSize)
+	files, err := output.WriteEventsToFiles(sorted, options.Output, options.MaxLengthSize, options.MaxTokens)
 	if err != nil {
 		return err
 	}

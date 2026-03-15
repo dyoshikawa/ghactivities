@@ -86,6 +86,7 @@ go run ./cmd/ghactivities \
 --until             End date in ISO8601 format (default: now)
 --visibility        Repository visibility: public, private, all (default: public)
 --max-length-size   Max output file size such as 1B, 2K, 2M (default: 1M)
+--max-tokens        Max output file tokens from rendered JSON (default: 0, disabled)
 --order             Event order: asc, desc (default: asc)
 --help              Show help
 ```
@@ -95,12 +96,13 @@ Notes:
 - `--since` and `--until` must be valid RFC3339 / ISO8601 timestamps such as `2026-03-15T12:00:00Z`.
 - `--visibility private` limits results to repositories GitHub reports as private.
 - `--order asc` returns oldest-first output; `--order desc` returns newest-first output.
+- `--max-tokens` counts tokens from the formatted JSON content using `github.com/tiktoken-go/tokenizer` with the `o200k_base` encoding.
 
 ## Output files and splitting
 
 By default, `ghactivities` writes a formatted JSON array to `./ghactivities.json`.
 
-If the rendered JSON exceeds `--max-length-size`, `ghactivities` automatically splits the result into numbered files that keep the same base name and extension:
+If the rendered JSON exceeds `--max-length-size` or `--max-tokens`, `ghactivities` automatically splits the result into numbered files that keep the same base name and extension:
 
 - `./ghactivities_1.json`
 - `./ghactivities_2.json`
@@ -111,10 +113,15 @@ For example:
 ```bash
 go run ./cmd/ghactivities \
   --output ./exports/activity.json \
-  --max-length-size 256K
+  --max-length-size 256K \
+  --max-tokens 20000
 ```
 
 This produces either `./exports/activity.json` or, when splitting is needed, files like `./exports/activity_1.json`, `./exports/activity_2.json`, and so on.
+
+Splitting keeps the existing event order intact and fills files in sequence. When both limits are set, `ghactivities` uses whichever limit is reached first for each chunk.
+
+If a single rendered event already exceeds `--max-length-size`, it is still written as its own numbered file because it cannot be split further. If a single rendered event exceeds `--max-tokens`, `ghactivities` returns an error instead of silently writing a file above the requested token cap.
 
 ## Development setup
 
