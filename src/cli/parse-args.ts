@@ -3,6 +3,7 @@ import { z } from "zod/mini";
 
 import type { CliOptions, Order, Visibility } from "../types/cli.js";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { parseSize } from "../utils/parse-size.js";
 
 const ArgsSchema = z.object({
@@ -56,9 +57,15 @@ export function parseCliArgs(argv: string[]): CliOptions {
       "max-length-size": { type: "string", default: "1M" },
       order: { type: "string", default: "asc" },
       help: { type: "boolean", default: false },
+      version: { type: "boolean", default: false },
     },
     strict: true,
   });
+
+  if (values.version) {
+    console.log(packageJson.version);
+    process.exit(0);
+  }
 
   if (values.help) {
     printHelp();
@@ -99,5 +106,6 @@ Options:
   --max-length-size   Max output file size: e.g., 1B, 2K, 2M (default: 1M)
   --order             Event order: asc, desc (default: asc)
   --help              Show this help message
+  --version           Show the version number
 `);
 }

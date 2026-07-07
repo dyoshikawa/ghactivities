@@ -186,6 +186,12 @@
     "omnisharp",
     "rego",
     "solargraph",
-    "bunx"
+    "bunx",
+    "anomalyco",
+    "deepseek",
+    "elif",
+    "kimi",
+    "moonshotai",
+    "uuidgen"
   ]
 }
