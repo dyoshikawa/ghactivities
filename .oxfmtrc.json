@@ -8,5 +8,11 @@
   "trailingComma": "all",
   "arrowParens": "always",
   "experimentalSortImports": {},
-  "ignorePatterns": ["package.json", "node_modules/**", "dist/**", "dist*/**"]
+  "ignorePatterns": [
+    "package.json",
+    "node_modules/**",
+    "dist/**",
+    "dist*/**",
+    ".claude/settings.json"
+  ]
 }

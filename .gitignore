@@ -255,8 +255,11 @@ ghevents.xml
 **/.aiignore
 **/.opencode/memories/
 **/.opencode/command/
+**/.opencode/commands/
 **/.opencode/agent/
+**/.opencode/agents/
 **/.opencode/skill/
+**/.opencode/skills/
 **/QWEN.md
 **/.qwen/memories/
 **/replit.md
