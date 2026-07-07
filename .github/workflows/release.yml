@@ -21,22 +21,22 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 10.12.2
+          bun-version: latest
 
       - name: Install dependencies
-        run: pnpm install
+        run: bun install
 
       - name: Run quality checks
         run: |
-          pnpm check
-          pnpm secretlint
-          pnpm cspell
-          pnpm test
+          bun run check
+          bun run secretlint
+          bun run cspell
+          bun run test
 
       - name: Publish to npm
-        run: pnpm publish
+        run: bun publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
