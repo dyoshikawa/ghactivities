@@ -18,5 +18,10 @@
       "enabled": true,
       "environment": {}
     }
-  }
+  },
+  "instructions": [
+    ".opencode/memories/coding-guidelines.md",
+    ".opencode/memories/feature-change-guidelines.md",
+    ".opencode/memories/testing-guidelines.md"
+  ]
 }
