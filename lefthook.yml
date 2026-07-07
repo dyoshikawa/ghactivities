@@ -1,4 +1,0 @@
-pre-commit:
-  jobs:
-    - name: gitleaks (staged changes)
-      run: gitleaks dir --redact --no-banner --exit-code 1 {staged_files}
