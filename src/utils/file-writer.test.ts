@@ -21,7 +21,7 @@ describe("writeEventsToFiles", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "ghevents-test-"));
+    tempDir = await mkdtemp(join(tmpdir(), "ghactivities-test-"));
   });
 
   afterEach(async () => {

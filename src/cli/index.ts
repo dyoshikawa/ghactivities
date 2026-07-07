@@ -10,7 +10,7 @@ import { resolveGitHubToken } from "../utils/token.js";
 import { parseCliArgs } from "./parse-args.js";
 
 async function main(): Promise<void> {
-  p.intro("ghevents");
+  p.intro("ghactivities");
 
   let options;
   try {

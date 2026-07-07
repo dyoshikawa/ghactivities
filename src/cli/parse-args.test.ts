@@ -31,7 +31,7 @@ describe("parseCliArgs", () => {
 
   it("uses defaults when no options provided", () => {
     const result = parseCliArgs([]);
-    expect(result.output).toBe("./ghevents.json");
+    expect(result.output).toBe("./ghactivities.json");
     expect(result.visibility).toBe("public");
     expect(result.maxLengthSize).toBe(1024 * 1024);
     expect(result.order).toBe("asc");

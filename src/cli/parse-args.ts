@@ -49,7 +49,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     args: argv,
     options: {
       "github-token": { type: "string" },
-      output: { type: "string", default: "./ghevents.json" },
+      output: { type: "string", default: "./ghactivities.json" },
       since: { type: "string", default: getDefaultSince() },
       until: { type: "string", default: new Date().toISOString() },
       visibility: { type: "string", default: "public" },
@@ -88,11 +88,11 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
 function printHelp(): void {
   console.log(`
-Usage: ghevents [options]
+Usage: ghactivities [options]
 
 Options:
   --github-token      GitHub access token (env: GITHUB_TOKEN or "gh auth token")
-  --output            Output file path (default: ./ghevents.json)
+  --output            Output file path (default: ./ghactivities.json)
   --since             Start date in ISO8601 format (default: 2 weeks ago)
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
