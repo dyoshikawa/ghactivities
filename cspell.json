@@ -1,5 +1,12 @@
 {
-  "ignorePaths": ["coverage/**", "dist/**", "bun.lock", "node_modules/**", ".git/**", ".gitignore"],
+  "ignorePaths": [
+    "coverage/**",
+    "dist/**",
+    "pnpm-lock.yaml",
+    "node_modules/**",
+    ".git/**",
+    ".gitignore"
+  ],
   "words": [
     "agentrequested",
     "aiexclude",
@@ -192,6 +199,13 @@
     "elif",
     "kimi",
     "moonshotai",
-    "uuidgen"
+    "uuidgen",
+    "tsdown",
+    "jdx",
+    "mise",
+    "dlx",
+    "npmrc",
+    "esbuild",
+    "npmjs"
   ]
 }

@@ -1,0 +1,5 @@
+minimumReleaseAgeExclude:
+  - knip@6.25.0
+onlyBuiltDependencies:
+  - esbuild
+  - simple-git-hooks
