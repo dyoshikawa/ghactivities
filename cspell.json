@@ -206,6 +206,7 @@
     "dlx",
     "npmrc",
     "esbuild",
-    "npmjs"
+    "npmjs",
+    "tldjs"
   ]
 }
