@@ -26,6 +26,18 @@ describe("E2E: CLI option validation", () => {
     });
   });
 
+  it("rejects a malformed --since date", async () => {
+    await expect(runCli(["--since", "not-a-date"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/since/i),
+    });
+  });
+
+  it("rejects a malformed --until date", async () => {
+    await expect(runCli(["--until", "not-a-date"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/until/i),
+    });
+  });
+
   it("rejects an unknown option", async () => {
     await expect(runCli(["--nope"])).rejects.toMatchObject({
       stdout: expect.stringMatching(/unknown option/i),
