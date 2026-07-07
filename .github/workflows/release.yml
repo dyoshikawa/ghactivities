@@ -1,51 +1,42 @@
-name: ghactivities Release
+name: Release
 
 on:
   release:
     types: [created]
 
 jobs:
-  build:
-    name: Build ghactivities Release Binaries
+  publish:
+    name: Publish to NPM
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            asset_name: ghactivities-linux-amd64
-          - goos: darwin
-            goarch: amd64
-            asset_name: ghactivities-darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            asset_name: ghactivities-darwin-arm64
-          - goos: windows
-            goarch: amd64
-            asset_name: ghactivities-windows-amd64.exe
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          ref: main
 
-      - name: Run tests
-        run: go test ./...
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
 
-      - name: Build ghactivities binary
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10.12.2
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run quality checks
+        run: |
+          pnpm check
+          pnpm secretlint
+          pnpm cspell
+          pnpm test
+
+      - name: Publish to npm
+        run: pnpm publish
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags="-s -w" -o ./dist/${{ matrix.asset_name }} ./cmd/ghactivities
-
-      - name: Upload asset to GitHub Release
-        uses: actions/upload-release-asset@v3
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./dist/${{ matrix.asset_name }}
-          asset_name: ${{ matrix.asset_name }}
-          asset_content_type: application/octet-stream
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
