@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+  simple-git-hooks: true
+  tldjs: false
+minimumReleaseAgeExclude:
+  - knip@6.25.0
