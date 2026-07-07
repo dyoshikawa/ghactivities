@@ -1,19 +1,7 @@
 [tools]
-bun = "1.3.6"
-deno = "2.6.5"
-gitleaks = "8.30.0"
-go = "1.25.4"
-lefthook = "2.1.4"
-node = "24.11.1"
-pnpm = "10.28.1"
-python = "3"
-rust = "latest"
+bun = "latest"
+go = "latest"
+node = "latest"
+pnpm = "latest"
+python = "latest"
 uv = "latest"
-
-[tasks.setup]
-description = "Install tools, tidy Go modules, and install git hooks"
-run = """
-mise install
-go mod tidy
-lefthook install
-"""
