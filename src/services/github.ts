@@ -99,7 +99,7 @@ export class GitHubService {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
 
-    const query = this.buildSearchQuery({
+    const searchQuery = this.buildSearchQuery({
       user: username,
       qualifiers: `author:${username} is:issue`,
     });
@@ -108,7 +108,7 @@ export class GitHubService {
     while (true) {
       const response: IssueSearchResponse = await this.graphqlWithAuth<IssueSearchResponse>(
         ISSUE_SEARCH_QUERY,
-        { query, first: 100, after: cursor },
+        { searchQuery, first: 100, after: cursor },
       );
 
       for (const node of response.search.nodes) {
@@ -139,7 +139,7 @@ export class GitHubService {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
 
-    const query = this.buildSearchQuery({
+    const searchQuery = this.buildSearchQuery({
       user: username,
       qualifiers: `commenter:${username} is:issue`,
     });
@@ -148,7 +148,7 @@ export class GitHubService {
     while (true) {
       const response: IssueCommentSearchResponse =
         await this.graphqlWithAuth<IssueCommentSearchResponse>(ISSUE_COMMENT_SEARCH_QUERY, {
-          query,
+          searchQuery,
           first: 100,
           after: cursor,
         });
@@ -186,7 +186,7 @@ export class GitHubService {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
 
-    const query = this.buildSearchQuery({
+    const searchQuery = this.buildSearchQuery({
       user: username,
       qualifiers: `author:${username} type:discussion`,
     });
@@ -195,7 +195,7 @@ export class GitHubService {
     while (true) {
       const response: DiscussionSearchResponse =
         await this.graphqlWithAuth<DiscussionSearchResponse>(DISCUSSION_SEARCH_QUERY, {
-          query,
+          searchQuery,
           first: 100,
           after: cursor,
         });
@@ -228,7 +228,7 @@ export class GitHubService {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
 
-    const query = this.buildSearchQuery({
+    const searchQuery = this.buildSearchQuery({
       user: username,
       qualifiers: `commenter:${username} type:discussion`,
     });
@@ -238,7 +238,7 @@ export class GitHubService {
       const response: DiscussionCommentSearchResponse =
         await this.graphqlWithAuth<DiscussionCommentSearchResponse>(
           DISCUSSION_COMMENT_SEARCH_QUERY,
-          { query, first: 100, after: cursor },
+          { searchQuery, first: 100, after: cursor },
         );
 
       for (const node of response.search.nodes) {
@@ -274,7 +274,7 @@ export class GitHubService {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
 
-    const query = this.buildSearchQuery({
+    const searchQuery = this.buildSearchQuery({
       user: username,
       qualifiers: `author:${username} is:pr`,
     });
@@ -283,7 +283,7 @@ export class GitHubService {
     while (true) {
       const response: PullRequestSearchResponse =
         await this.graphqlWithAuth<PullRequestSearchResponse>(PULL_REQUEST_SEARCH_QUERY, {
-          query,
+          searchQuery,
           first: 100,
           after: cursor,
         });
@@ -316,7 +316,7 @@ export class GitHubService {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
 
-    const query = this.buildSearchQuery({
+    const searchQuery = this.buildSearchQuery({
       user: username,
       qualifiers: `commenter:${username} is:pr`,
     });
@@ -326,7 +326,7 @@ export class GitHubService {
       const response: PullRequestCommentSearchResponse =
         await this.graphqlWithAuth<PullRequestCommentSearchResponse>(
           PULL_REQUEST_COMMENT_SEARCH_QUERY,
-          { query, first: 100, after: cursor },
+          { searchQuery, first: 100, after: cursor },
         );
 
       for (const node of response.search.nodes) {
