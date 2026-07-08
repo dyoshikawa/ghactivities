@@ -6,7 +6,7 @@ description: overview
 
 # Project Overview
 
-- Read @SPEC.md if you want to know the specification.
+- Read @README.md if you want to know the tool's usage and specification.
 - Manage runtimes and package managers with @mise.toml .
 - When you want to check entire codebase:
   - You can use:
