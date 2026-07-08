@@ -6,8 +6,14 @@ description: "When you add or change features, must follow these guidelines."
 
 # Guidelines for Adding or Modifying Features
 
-- Check whether `rules-processor.ts` needs an updated Additional Convention, especially values within `additionalConvention`. For example, if you remove support for Cursor's Skill feature simulation, remove `skills: { skillClass: CursorSkill }` within convention entry for Cursor.
-- Review frontmatter in both rulesync files (`rulesync-{feature}.ts`) and tool files (`{tool}-{feature}.ts`). For overlapping parameters (e.g., `description`), prefer the rulesync value by default, but if the tool file defines the parameter, that tool-specific value takes precedence.
-- Evaluate whether `gitignore.ts` needs additions or changes in its generated output. And `pnpm dev gitignore` should be run to update `.gitignore` in the project.
-- Consider project scope and global scope support. Simulated support should cover project scope only. For native support, implement both project and global scope when the target tool supports them. Consult the tool’s official documentation to decide scope support.
-- Keep `Supported Tools and Features` section and `Each File Format` section in `README.md` synchronized with the implemented functionality.
+- Keep `README.md` synchronized with the implemented functionality. In particular, keep the **Features**, **Options**, **Output**, and **Notes** sections consistent with the actual behavior.
+- When you add or change a CLI option:
+  - Update the argument schema and parser in `src/cli/parse-args.ts` (the `zod/mini` schema and the argument parsing config).
+  - Update the `--help` text rendered by the CLI so it lists the option.
+  - Update the **Options** table in `README.md`.
+- When you add or change an event type (Issue, IssueComment, Discussion, DiscussionComment, PullRequest, PullRequestComment, Commit):
+  - Update the type definitions in `src/types/events.ts`.
+  - Update the fetching logic in `src/services/github.ts` and the GraphQL/REST queries in `src/services/github-queries.ts`.
+  - Update the **Features** list and the **Output** example in `README.md`.
+- Add or update tests for the change: unit tests (`*.test.ts`, co-located with the implementation) and, when the change affects CLI behavior that resolves before any GitHub API call, an E2E test under `src/e2e/`.
+- Run `pnpm cicheck` before committing to verify code style, type safety, tests, spelling, and secrets.

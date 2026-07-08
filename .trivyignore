@@ -1,0 +1,6 @@
+# Trivy ignore file for the Security Scan workflow.
+#
+# Add finding IDs (one per line) that have been reviewed and accepted, e.g.:
+#   CVE-2024-XXXXX
+#   DS-0001
+# Prefer fixing findings over ignoring them. Document the reason for every entry.
