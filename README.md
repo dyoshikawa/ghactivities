@@ -41,17 +41,18 @@ To include private repositories (`--visibility private` or `--visibility all`), 
 
 ## Options
 
-| Option              | Description                                                                                           | Default                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `--github-token`    | GitHub access token.                                                                                  | `GITHUB_TOKEN` env, then `gh auth token` |
-| `--output`          | Output file path.                                                                                     | `./ghactivities.json`                    |
-| `--since`           | Start of the range, in ISO 8601 format.                                                               | 2 weeks ago                              |
-| `--until`           | End of the range, in ISO 8601 format.                                                                 | now                                      |
-| `--visibility`      | Repository visibility: `public`, `private`, or `all`.                                                 | `public`                                 |
-| `--max-length-size` | Maximum output file size (e.g. `1B`, `2K`, `2M`, `1G`). Larger output is split across multiple files. | `1M`                                     |
-| `--order`           | Event order by date: `asc` or `desc`.                                                                 | `asc`                                    |
-| `--help`            | Show the help message.                                                                                |                                          |
-| `--version`         | Show the version number.                                                                              |                                          |
+| Option              | Description                                                                                                                                                                                | Default                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| `--github-token`    | GitHub access token.                                                                                                                                                                       | `GITHUB_TOKEN` env, then `gh auth token` |
+| `--output`          | Output file path.                                                                                                                                                                          | `./ghactivities.json`                    |
+| `--since`           | Start of the range, in ISO 8601 format.                                                                                                                                                    | 2 weeks ago                              |
+| `--until`           | End of the range, in ISO 8601 format.                                                                                                                                                      | now                                      |
+| `--visibility`      | Repository visibility: `public`, `private`, or `all`.                                                                                                                                      | `public`                                 |
+| `--max-length-size` | Maximum output file size (e.g. `1B`, `2K`, `2M`, `1G`). Larger output is split across multiple files.                                                                                      | `1M`                                     |
+| `--max-tokens`      | Maximum number of tokens per output file (counted with `js-tiktoken`'s `cl100k_base` encoding). Output is split when a file would exceed this. Applied in addition to `--max-length-size`. | (disabled)                               |
+| `--order`           | Event order by date: `asc` or `desc`.                                                                                                                                                      | `asc`                                    |
+| `--help`            | Show the help message.                                                                                                                                                                     |                                          |
+| `--version`         | Show the version number.                                                                                                                                                                   |                                          |
 
 ## Output
 
@@ -78,7 +79,9 @@ Each event shares a common shape and adds type-specific fields:
 
 ### File splitting
 
-When the JSON output would exceed `--max-length-size`, it is split into multiple files named after `--output` with a numeric suffix, for example `./ghactivities_1.json`, `./ghactivities_2.json`, and so on. A single event that is larger than the limit is still written to its own file.
+When the JSON output would exceed `--max-length-size` (or `--max-tokens`, if set), it is split into multiple files named after `--output` with a numeric suffix, for example `./ghactivities_1.json`, `./ghactivities_2.json`, and so on. A single event that is larger than the limit is still written to its own file.
+
+When both `--max-length-size` and `--max-tokens` are given, a file is split as soon as it would exceed **either** limit. Token counts are computed with [`js-tiktoken`](https://www.npmjs.com/package/js-tiktoken) using the `cl100k_base` encoding.
 
 ## Examples
 
