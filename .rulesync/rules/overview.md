@@ -20,7 +20,4 @@ description: overview
   - You must not use `--no-verify` option because it skips pre-commit checks and causes serious security issues.
 - When you read or search the codebase:
   - You should check Serena MCP server tools, and use those actively.
-- About the `skills/` directory at the repository root:
-  - This directory contains official skills that are distributed for users to install via the `rulesync fetch` command (e.g., `pnpm dlx rulesync fetch dyoshikawa/rulesync --features skills`).
-  - It is NOT the same as `.rulesync/skills/`, which holds the project's own skill definitions used during generation.
-  - Do not modify the root `skills/` directory unless you intend to change the official skills distributed to users.
+- The `.rulesync/` directory holds this project's rule, command, subagent, skill, ignore, and MCP definitions. Editing files under `.rulesync/` requires running `pnpm generate` (which runs `rulesync generate`) to regenerate the tool-specific outputs; CI fails if the generated files are out of date.

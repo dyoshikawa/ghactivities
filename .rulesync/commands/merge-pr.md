@@ -93,4 +93,4 @@ If the local branch exists, please clean up the local branch. Execute:
 git checkout main && git pull --prune && git branch -d <branch-name>
 ```
 
-Where `<branch-name>` is the head branch name from Step 2 (e.g., `fix/rulesync-import-targets`).
+Where `<branch-name>` is the head branch name from Step 2 (e.g., `fix/octokit-graphql-reserved-query-var`).
