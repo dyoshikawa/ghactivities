@@ -208,6 +208,11 @@
     "esbuild",
     "npmjs",
     "tldjs",
-    "tiktoken"
+    "tiktoken",
+    "trivy",
+    "trivyignores",
+    "aquasecurity",
+    "misconfig",
+    "worktree"
   ]
 }
