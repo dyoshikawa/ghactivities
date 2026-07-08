@@ -63,6 +63,7 @@
 		"@clack/prompts": "1.0.0",
 		"@octokit/graphql": "9.0.3",
 		"@octokit/rest": "22.0.1",
+		"js-tiktoken": "^1.0.21",
 		"zod": "4.3.6"
 	},
 	"devDependencies": {

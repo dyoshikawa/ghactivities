@@ -17,6 +17,8 @@ describe("parseCliArgs", () => {
       "all",
       "--max-length-size",
       "2M",
+      "--max-tokens",
+      "1000",
       "--order",
       "desc",
     ]);
@@ -26,6 +28,7 @@ describe("parseCliArgs", () => {
     expect(result.until.toISOString()).toBe("2024-06-01T00:00:00.000Z");
     expect(result.visibility).toBe("all");
     expect(result.maxLengthSize).toBe(2 * 1024 * 1024);
+    expect(result.maxTokens).toBe(1000);
     expect(result.order).toBe("desc");
   });
 
@@ -34,6 +37,7 @@ describe("parseCliArgs", () => {
     expect(result.output).toBe("./ghactivities.json");
     expect(result.visibility).toBe("public");
     expect(result.maxLengthSize).toBe(1024 * 1024);
+    expect(result.maxTokens).toBeUndefined();
     expect(result.order).toBe("asc");
     expect(result.since).toBeInstanceOf(Date);
     expect(result.until).toBeInstanceOf(Date);
@@ -53,6 +57,12 @@ describe("parseCliArgs", () => {
 
   it("throws on invalid max-length-size", () => {
     expect(() => parseCliArgs(["--max-length-size", "abc"])).toThrow();
+  });
+
+  it("throws on invalid max-tokens", () => {
+    expect(() => parseCliArgs(["--max-tokens", "abc"])).toThrow();
+    expect(() => parseCliArgs(["--max-tokens", "0"])).toThrow();
+    expect(() => parseCliArgs(["--max-tokens", "-5"])).toThrow();
   });
 
   it("calls process.exit on --help", () => {

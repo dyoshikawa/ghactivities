@@ -45,6 +45,7 @@ async function main(): Promise<void> {
       events: sorted,
       output: options.output,
       maxLengthSize: options.maxLengthSize,
+      maxTokens: options.maxTokens,
     });
     s.stop(`Written to ${files.join(", ")}`);
 

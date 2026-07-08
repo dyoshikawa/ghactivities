@@ -26,6 +26,12 @@ describe("E2E: CLI option validation", () => {
     });
   });
 
+  it("rejects a malformed --max-tokens value", async () => {
+    await expect(runCli(["--max-tokens", "abc"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/max-tokens|token/i),
+    });
+  });
+
   it("rejects a malformed --since date", async () => {
     await expect(runCli(["--since", "not-a-date"])).rejects.toMatchObject({
       stdout: expect.stringMatching(/since/i),

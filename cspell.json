@@ -207,6 +207,7 @@
     "npmrc",
     "esbuild",
     "npmjs",
-    "tldjs"
+    "tldjs",
+    "tiktoken"
   ]
 }

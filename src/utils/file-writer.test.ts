@@ -62,6 +62,38 @@ describe("writeEventsToFiles", () => {
     expect(files[0]).toContain("events_1.json");
   });
 
+  it("splits into multiple files when exceeding token limit", async () => {
+    const events = [makeEvent(1), makeEvent(2), makeEvent(3)];
+    const output = join(tempDir, "events.json");
+
+    const files = await writeEventsToFiles({
+      events,
+      output,
+      maxLengthSize: 1024 * 1024,
+      maxTokens: 30,
+    });
+
+    expect(files.length).toBeGreaterThan(1);
+    for (const file of files) {
+      const content = await readFile(file, "utf-8");
+      const parsed = JSON.parse(content) as GitHubEvent[];
+      expect(Array.isArray(parsed)).toBe(true);
+    }
+    expect(files[0]).toContain("events_1.json");
+  });
+
+  it("writes a single file when within both size and token limits", async () => {
+    const events = [makeEvent(1)];
+    const output = join(tempDir, "events.json");
+    const files = await writeEventsToFiles({
+      events,
+      output,
+      maxLengthSize: 1024 * 1024,
+      maxTokens: 1_000_000,
+    });
+    expect(files).toEqual([output]);
+  });
+
   it("handles empty events array", async () => {
     const output = join(tempDir, "events.json");
     const files = await writeEventsToFiles({

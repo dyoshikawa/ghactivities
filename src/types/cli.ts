@@ -8,5 +8,6 @@ export interface CliOptions {
   until: Date;
   visibility: Visibility;
   maxLengthSize: number;
+  maxTokens?: number | undefined;
   order: Order;
 }

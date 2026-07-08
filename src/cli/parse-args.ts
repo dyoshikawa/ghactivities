@@ -36,6 +36,13 @@ const ArgsSchema = z.object({
       },
     ),
   ),
+  maxTokens: z.optional(
+    z.string().check(
+      z.refine((v) => /^\d+$/.test(v.trim()) && Number(v.trim()) > 0, {
+        message: "Invalid value for --max-tokens. Expected a positive integer (e.g., 1000).",
+      }),
+    ),
+  ),
   order: z.enum(["asc", "desc"]),
 });
 
@@ -55,6 +62,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
       until: { type: "string", default: new Date().toISOString() },
       visibility: { type: "string", default: "public" },
       "max-length-size": { type: "string", default: "1M" },
+      "max-tokens": { type: "string" },
       order: { type: "string", default: "asc" },
       help: { type: "boolean", default: false },
       version: { type: "boolean", default: false },
@@ -79,6 +87,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     until: values.until,
     visibility: values.visibility,
     maxLengthSize: values["max-length-size"],
+    maxTokens: values["max-tokens"],
     order: values.order,
   });
 
@@ -89,6 +98,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     until: new Date(parsed.until),
     visibility: parsed.visibility as Visibility,
     maxLengthSize: parseSize(parsed.maxLengthSize),
+    maxTokens: parsed.maxTokens === undefined ? undefined : Number(parsed.maxTokens.trim()),
     order: parsed.order as Order,
   };
 }
@@ -104,6 +114,7 @@ Options:
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
   --max-length-size   Max output file size: e.g., 1B, 2K, 2M (default: 1M)
+  --max-tokens        Max tokens per output file (js-tiktoken, cl100k_base); splits when exceeded
   --order             Event order: asc, desc (default: asc)
   --help              Show this help message
   --version           Show the version number

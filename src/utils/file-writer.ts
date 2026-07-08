@@ -3,28 +3,47 @@ import { basename, dirname, extname, join } from "node:path";
 
 import type { GitHubEvent } from "../types/events.js";
 
+import { countTokens } from "./count-tokens.js";
+
+function exceedsLimit(params: {
+  json: string;
+  maxLengthSize: number;
+  maxTokens?: number | undefined;
+}): boolean {
+  const { json, maxLengthSize, maxTokens } = params;
+  if (Buffer.byteLength(json, "utf-8") > maxLengthSize) {
+    return true;
+  }
+  if (maxTokens !== undefined && countTokens(json) > maxTokens) {
+    return true;
+  }
+  return false;
+}
+
 export async function writeEventsToFiles(params: {
   events: GitHubEvent[];
   output: string;
   maxLengthSize: number;
+  maxTokens?: number | undefined;
 }): Promise<string[]> {
-  const { events, output, maxLengthSize } = params;
+  const { events, output, maxLengthSize, maxTokens } = params;
   const json = JSON.stringify(events, null, 2);
 
-  if (Buffer.byteLength(json, "utf-8") <= maxLengthSize) {
+  if (!exceedsLimit({ json, maxLengthSize, maxTokens })) {
     await writeFile(output, json, "utf-8");
     return [output];
   }
 
-  return splitAndWriteFiles({ events, output, maxLengthSize });
+  return splitAndWriteFiles({ events, output, maxLengthSize, maxTokens });
 }
 
 async function splitAndWriteFiles(params: {
   events: GitHubEvent[];
   output: string;
   maxLengthSize: number;
+  maxTokens?: number | undefined;
 }): Promise<string[]> {
-  const { events, output, maxLengthSize } = params;
+  const { events, output, maxLengthSize, maxTokens } = params;
   const dir = dirname(output);
   const ext = extname(output);
   const base = basename(output, ext);
@@ -37,7 +56,7 @@ async function splitAndWriteFiles(params: {
     currentChunk.push(event);
     const chunkJson = JSON.stringify(currentChunk, null, 2);
 
-    if (Buffer.byteLength(chunkJson, "utf-8") > maxLengthSize) {
+    if (exceedsLimit({ json: chunkJson, maxLengthSize, maxTokens })) {
       if (currentChunk.length === 1) {
         const filePath = join(dir, `${base}_${String(fileIndex)}${ext}`);
         await writeFile(filePath, chunkJson, "utf-8");
