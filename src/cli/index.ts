@@ -3,10 +3,12 @@
 import * as p from "@clack/prompts";
 
 import { GitHubService } from "../services/github.js";
+import { scanActivities } from "../services/scan.js";
 import { formatError } from "../utils/error.js";
 import { writeEventsToFiles } from "../utils/file-writer.js";
 import { sortEvents } from "../utils/sort-events.js";
 import { resolveGitHubToken } from "../utils/token.js";
+import { emitScanReport } from "./emit-scan-report.js";
 import { parseCliArgs } from "./parse-args.js";
 import { runScan } from "./scan-command.js";
 
@@ -55,6 +57,14 @@ async function main(): Promise<void> {
       maxTokens: options.maxTokens,
     });
     s.stop(`Written to ${files.join(", ")}`);
+
+    if (options.scan) {
+      s.start(`Scanning with ${options.scan.provider} (${options.scan.model})...`);
+      const content = JSON.stringify(sorted, null, 2);
+      const report = await scanActivities({ config: options.scan, content });
+      s.stop("Scan complete.");
+      await emitScanReport({ report, output: options.scan.output });
+    }
 
     p.outro(`Done! ${String(sorted.length)} events collected.`);
   } catch (error) {

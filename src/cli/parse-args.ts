@@ -5,6 +5,7 @@ import type { CliOptions, Order, Visibility } from "../types/cli.js";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { parseSize } from "../utils/parse-size.js";
+import { resolveScanConfig } from "./parse-scan-args.js";
 
 const ArgsSchema = z.object({
   githubToken: z.optional(z.string()),
@@ -64,6 +65,13 @@ export function parseCliArgs(argv: string[]): CliOptions {
       "max-length-size": { type: "string", default: "1M" },
       "max-tokens": { type: "string" },
       order: { type: "string", default: "asc" },
+      scan: { type: "boolean", default: false },
+      provider: { type: "string" },
+      model: { type: "string" },
+      "api-key": { type: "string" },
+      "scan-output": { type: "string" },
+      "vertex-project": { type: "string" },
+      "vertex-location": { type: "string" },
       help: { type: "boolean", default: false },
       version: { type: "boolean", default: false },
     },
@@ -91,6 +99,17 @@ export function parseCliArgs(argv: string[]): CliOptions {
     order: values.order,
   });
 
+  const scan = values.scan
+    ? resolveScanConfig({
+        provider: values.provider,
+        model: values.model,
+        apiKey: values["api-key"],
+        output: values["scan-output"],
+        vertexProject: values["vertex-project"],
+        vertexLocation: values["vertex-location"],
+      })
+    : undefined;
+
   return {
     githubToken: parsed.githubToken ?? "",
     output: parsed.output,
@@ -100,6 +119,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     maxLengthSize: parseSize(parsed.maxLengthSize),
     maxTokens: parsed.maxTokens === undefined ? undefined : Number(parsed.maxTokens.trim()),
     order: parsed.order as Order,
+    scan,
   };
 }
 
@@ -117,16 +137,18 @@ Options:
   --max-length-size   Max output file size: e.g., 1B, 2K, 2M (default: 1M)
   --max-tokens        Max tokens per output file (js-tiktoken, cl100k_base); splits when exceeded
   --order             Event order: asc, desc (default: asc)
+  --scan              After collecting, scan the output with an LLM (see scan options)
+  --scan-output       With --scan, write the report to this file instead of stdout
   --help              Show this help message
   --version           Show the version number
 
-scan options (ghactivities scan <dir or file>):
+scan options (used by "ghactivities scan <dir or file>" and by --scan):
   Scan collected activity JSON with an LLM and print a Markdown report.
   --provider          LLM provider: openai, google, vertexai, openrouter (default: openai)
   --model             Model id (default depends on the provider)
   --api-key           API key (env: OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY,
                       GOOGLE_VERTEX_API_KEY, or OPENROUTER_API_KEY by provider)
-  --output            Write the report to this file instead of stdout
+  --output            (scan subcommand only) write the report to this file instead of stdout
   --vertex-project    Google Vertex project (provider: vertexai)
   --vertex-location   Google Vertex location (provider: vertexai)
 `);

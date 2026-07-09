@@ -38,4 +38,18 @@ describe("E2E: scan subcommand", () => {
       },
     );
   });
+
+  it("rejects --scan on the collect command with an invalid provider", async () => {
+    await expect(runCli(["--scan", "--provider", "bogus", "--api-key", "k"])).rejects.toMatchObject(
+      {
+        stdout: expect.stringMatching(/provider|invalid/i),
+      },
+    );
+  });
+
+  it("rejects --scan on the collect command with no resolvable API key", async () => {
+    await expect(runCli(["--scan"], { env: { OPENAI_API_KEY: "" } })).rejects.toMatchObject({
+      stdout: expect.stringMatching(/api key/i),
+    });
+  });
 });

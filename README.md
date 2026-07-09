@@ -53,6 +53,8 @@ To include private repositories (`--visibility private` or `--visibility all`), 
 | `--max-length-size` | Maximum output file size (e.g. `1B`, `2K`, `2M`, `1G`). Larger output is split across multiple files.                                                                                      | `1M`                                     |
 | `--max-tokens`      | Maximum number of tokens per output file (counted with `js-tiktoken`'s `cl100k_base` encoding). Output is split when a file would exceed this. Applied in addition to `--max-length-size`. | (disabled)                               |
 | `--order`           | Event order by date: `asc` or `desc`.                                                                                                                                                      | `asc`                                    |
+| `--scan`            | After collecting, scan the output with an LLM and emit a Markdown report (see [Scanning activity with an LLM](#scanning-activity-with-an-llm) for the provider options).                   | off                                      |
+| `--scan-output`     | With `--scan`, write the report to this file instead of stdout.                                                                                                                            | stdout                                   |
 | `--help`            | Show the help message.                                                                                                                                                                     |                                          |
 | `--version`         | Show the version number.                                                                                                                                                                   |                                          |
 
@@ -117,6 +119,18 @@ npx ghactivities scan ./out --provider google --output ./report.md
 ```
 
 You pass either a **file** or a **directory**. When a directory is given, every `*.json` file inside it is read and scanned together. By default the report is printed to stdout; pass `--output` to write it to a file instead.
+
+### One-stop collect and scan
+
+You can also collect and scan in a single run by adding `--scan` to the normal command. The same provider options (`--provider`, `--model`, `--api-key`, `--vertex-project`, `--vertex-location`) apply, and `--scan-output` writes the report to a file instead of stdout:
+
+```bash
+# Collect the last two weeks and immediately scan the result
+npx ghactivities --scan --provider openai
+
+# Collect, then write both the JSON and the report to files
+npx ghactivities --output ./activity.json --scan --provider google --scan-output ./report.md
+```
 
 ### Providers and API keys
 

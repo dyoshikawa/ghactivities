@@ -1,3 +1,5 @@
+import type { ScanConfig } from "./scan.js";
+
 export type Visibility = "public" | "private" | "all";
 export type Order = "asc" | "desc";
 
@@ -10,4 +12,6 @@ export interface CliOptions {
   maxLengthSize: number;
   maxTokens?: number | undefined;
   order: Order;
+  /** When set (via --scan), the collected output is scanned with an LLM. */
+  scan?: ScanConfig | undefined;
 }

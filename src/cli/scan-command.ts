@@ -1,9 +1,9 @@
 import * as p from "@clack/prompts";
-import { writeFile } from "node:fs/promises";
 
 import { scanActivities } from "../services/scan.js";
 import { formatError } from "../utils/error.js";
 import { readActivities } from "../utils/read-activities.js";
+import { emitScanReport } from "./emit-scan-report.js";
 import { parseScanArgs } from "./parse-scan-args.js";
 
 export async function runScan(argv: string[]): Promise<void> {
@@ -25,16 +25,11 @@ export async function runScan(argv: string[]): Promise<void> {
     s.stop(`Read ${String(files.length)} file(s).`);
 
     s.start(`Scanning with ${options.provider} (${options.model})...`);
-    const report = await scanActivities({ options, content });
+    const report = await scanActivities({ config: options, content });
     s.stop("Scan complete.");
 
-    if (options.output) {
-      await writeFile(options.output, report, "utf-8");
-      p.outro(`Report written to ${options.output}`);
-    } else {
-      p.log.message(report);
-      p.outro("Done!");
-    }
+    await emitScanReport({ report, output: options.output });
+    p.outro("Done!");
   } catch (error) {
     s.stop("Failed.");
     p.log.error(formatError(error));
