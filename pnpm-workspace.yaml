@@ -4,3 +4,11 @@ allowBuilds:
   tldjs: false
 minimumReleaseAgeExclude:
   - knip@6.25.0
+  - "@ai-sdk/anthropic@4.0.10"
+  - "@ai-sdk/gateway@4.0.14"
+  - "@ai-sdk/google-vertex@5.0.13"
+  - "@ai-sdk/google@4.0.10"
+  - "@ai-sdk/openai-compatible@3.0.6"
+  - "@ai-sdk/openai@4.0.9"
+  - "@ai-sdk/provider-utils@5.0.6"
+  - ai@7.0.18

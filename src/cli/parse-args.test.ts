@@ -43,6 +43,41 @@ describe("parseCliArgs", () => {
     expect(result.until).toBeInstanceOf(Date);
   });
 
+  it("leaves scan undefined unless --scan is passed", () => {
+    expect(parseCliArgs([]).scan).toBeUndefined();
+  });
+
+  it("resolves scan config when --scan is passed", () => {
+    const result = parseCliArgs([
+      "--scan",
+      "--provider",
+      "openrouter",
+      "--model",
+      "openai/gpt-4o",
+      "--api-key",
+      "sk-test",
+      "--scan-output",
+      "./report.md",
+    ]);
+    expect(result.scan).toEqual({
+      provider: "openrouter",
+      model: "openai/gpt-4o",
+      apiKey: "sk-test",
+      output: "./report.md",
+      vertexProject: undefined,
+      vertexLocation: undefined,
+    });
+  });
+
+  it("throws when --scan is passed without a resolvable API key", () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    try {
+      expect(() => parseCliArgs(["--scan"])).toThrow(/api key/i);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("throws on invalid visibility", () => {
     expect(() => parseCliArgs(["--visibility", "invalid"])).toThrow();
   });
