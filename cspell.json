@@ -155,6 +155,7 @@
     "typer",
     "unpipe",
     "venv",
+    "vertexai",
     "vite",
     "vuepress",
     "weakmap",

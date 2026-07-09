@@ -106,6 +106,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
 function printHelp(): void {
   console.log(`
 Usage: ghactivities [options]
+       ghactivities scan <dir or file> [scan options]
 
 Options:
   --github-token      GitHub access token (env: GITHUB_TOKEN or "gh auth token")
@@ -118,5 +119,15 @@ Options:
   --order             Event order: asc, desc (default: asc)
   --help              Show this help message
   --version           Show the version number
+
+scan options (ghactivities scan <dir or file>):
+  Scan collected activity JSON with an LLM and print a Markdown report.
+  --provider          LLM provider: openai, google, vertexai, openrouter (default: openai)
+  --model             Model id (default depends on the provider)
+  --api-key           API key (env: OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY,
+                      GOOGLE_VERTEX_API_KEY, or OPENROUTER_API_KEY by provider)
+  --output            Write the report to this file instead of stdout
+  --vertex-project    Google Vertex project (provider: vertexai)
+  --vertex-location   Google Vertex location (provider: vertexai)
 `);
 }

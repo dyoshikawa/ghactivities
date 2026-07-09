@@ -8,8 +8,15 @@ import { writeEventsToFiles } from "../utils/file-writer.js";
 import { sortEvents } from "../utils/sort-events.js";
 import { resolveGitHubToken } from "../utils/token.js";
 import { parseCliArgs } from "./parse-args.js";
+import { runScan } from "./scan-command.js";
 
 async function main(): Promise<void> {
+  const [subcommand, ...rest] = process.argv.slice(2);
+  if (subcommand === "scan") {
+    await runScan(rest);
+    return;
+  }
+
   p.intro("ghactivities");
 
   let options;

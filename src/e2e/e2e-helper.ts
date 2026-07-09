@@ -35,11 +35,15 @@ function resolveRunner(): { cmd: string; baseArgs: string[] } {
 
 const { cmd: ghCmd, baseArgs: ghArgs } = resolveRunner();
 
-/** Run the ghactivities CLI with args, returning { stdout, stderr }. */
-export function runCli(args: string[], opts: { cwd?: string } = {}) {
+/**
+ * Run the ghactivities CLI with args, returning { stdout, stderr }. Values in
+ * `opts.env` are merged on top of the current environment (pass an empty string
+ * to force-unset a variable such as an API key).
+ */
+export function runCli(args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return execFileAsync(ghCmd, [...ghArgs, ...args], {
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env },
+    env: { ...process.env, ...opts.env },
   });
 }
 

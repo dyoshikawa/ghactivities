@@ -14,6 +14,8 @@ Fetches the following events authored by you within a date range and outputs the
 - **PullRequestComment** — comments you left on pull requests
 - **Commit** — commits you authored (on each repository's default branch)
 
+It can also **scan** the collected JSON with an LLM to produce a Markdown summary report — see [Scanning activity with an LLM](#scanning-activity-with-an-llm).
+
 ## Requirements
 
 - Node.js >= 20
@@ -97,7 +99,49 @@ npx ghactivities \
 
 # Write to a custom file, newest first, splitting at 500 KB
 npx ghactivities --output ./activity.json --order desc --max-length-size 500K
+
+# Scan the collected activity with an LLM and print a Markdown report
+npx ghactivities scan ./ghactivities.json --provider openai
 ```
+
+## Scanning activity with an LLM
+
+The `scan` subcommand reads the JSON produced by `ghactivities` and asks a large language model (via the [Vercel AI SDK](https://ai-sdk.dev/)) to summarize your activity into a Markdown report.
+
+```bash
+# Scan a single file
+npx ghactivities scan ./ghactivities.json
+
+# Scan a directory (every *.json file inside it is read)
+npx ghactivities scan ./out --provider google --output ./report.md
+```
+
+You pass either a **file** or a **directory**. When a directory is given, every `*.json` file inside it is read and scanned together. By default the report is printed to stdout; pass `--output` to write it to a file instead.
+
+### Providers and API keys
+
+The `--provider` option selects the LLM provider. The API key is resolved from the `--api-key` option, falling back to a provider-specific environment variable:
+
+| Provider (`--provider`) | Default model        | API key environment variable                       |
+| ----------------------- | -------------------- | -------------------------------------------------- |
+| `openai`                | `gpt-4o-mini`        | `OPENAI_API_KEY`                                   |
+| `google`                | `gemini-2.0-flash`   | `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` |
+| `vertexai`              | `gemini-2.0-flash`   | `GOOGLE_VERTEX_API_KEY`                            |
+| `openrouter`            | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY`                               |
+
+For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vertex-project` / `--vertex-location` (or the `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION` environment variables).
+
+### Scan options
+
+| Option              | Description                                                                   | Default                      |
+| ------------------- | ----------------------------------------------------------------------------- | ---------------------------- |
+| `<dir or file>`     | Path to an activities JSON file or a directory of them (positional argument). | (required)                   |
+| `--provider`        | LLM provider: `openai`, `google`, `vertexai`, `openrouter`.                   | `openai`                     |
+| `--model`           | Model id.                                                                     | depends on the provider      |
+| `--api-key`         | API key for the provider.                                                     | provider env var (above)     |
+| `--output`          | Write the report to this file instead of stdout.                              | stdout                       |
+| `--vertex-project`  | Google Vertex project (provider `vertexai`).                                  | `GOOGLE_VERTEX_PROJECT` env  |
+| `--vertex-location` | Google Vertex location (provider `vertexai`).                                 | `GOOGLE_VERTEX_LOCATION` env |
 
 ## Notes
 
