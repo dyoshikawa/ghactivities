@@ -1,5 +1,6 @@
 {
   "ignorePaths": [
+    ".serena/**",
     "coverage/**",
     "dist/**",
     "pnpm-lock.yaml",
