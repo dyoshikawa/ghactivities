@@ -6,10 +6,10 @@ import { buildModel } from "./scan.js";
 
 describe("buildModel", () => {
   const cases: { provider: ScanProvider; model: string }[] = [
-    { provider: "openai", model: "gpt-4o-mini" },
-    { provider: "google", model: "gemini-2.0-flash" },
-    { provider: "vertexai", model: "gemini-2.0-flash" },
-    { provider: "openrouter", model: "openai/gpt-4o-mini" },
+    { provider: "openai", model: "gpt-5.6-luna" },
+    { provider: "google", model: "gemini-3.1-flash-lite" },
+    { provider: "vertexai", model: "gemini-3.1-flash-lite" },
+    { provider: "openrouter", model: "openai/gpt-5.6-luna" },
   ];
 
   for (const { provider, model } of cases) {
