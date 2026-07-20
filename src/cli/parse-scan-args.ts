@@ -6,10 +6,10 @@ import type { ScanConfig, ScanOptions, ScanProvider } from "../types/scan.js";
 const ProviderSchema = z.enum(["openai", "google", "vertexai", "openrouter"]);
 
 const DEFAULT_MODELS: Record<ScanProvider, string> = {
-  openai: "gpt-4o-mini",
-  google: "gemini-2.0-flash",
-  vertexai: "gemini-2.0-flash",
-  openrouter: "openai/gpt-4o-mini",
+  openai: "gpt-5.6-luna",
+  google: "gemini-3.1-flash-lite",
+  vertexai: "gemini-3.1-flash-lite",
+  openrouter: "openai/gpt-5.6-luna",
 };
 
 // Provider-specific environment variables consulted, in order, when

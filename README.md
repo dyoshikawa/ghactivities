@@ -136,12 +136,12 @@ npx ghactivities --output ./activity.json --scan --provider google --scan-output
 
 The `--provider` option selects the LLM provider. The API key is resolved from the `--api-key` option, falling back to a provider-specific environment variable:
 
-| Provider (`--provider`) | Default model        | API key environment variable                       |
-| ----------------------- | -------------------- | -------------------------------------------------- |
-| `openai`                | `gpt-4o-mini`        | `OPENAI_API_KEY`                                   |
-| `google`                | `gemini-2.0-flash`   | `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` |
-| `vertexai`              | `gemini-2.0-flash`   | `GOOGLE_VERTEX_API_KEY`                            |
-| `openrouter`            | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY`                               |
+| Provider (`--provider`) | Default model           | API key environment variable                       |
+| ----------------------- | ----------------------- | -------------------------------------------------- |
+| `openai`                | `gpt-5.6-luna`          | `OPENAI_API_KEY`                                   |
+| `google`                | `gemini-3.1-flash-lite` | `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` |
+| `vertexai`              | `gemini-3.1-flash-lite` | `GOOGLE_VERTEX_API_KEY`                            |
+| `openrouter`            | `openai/gpt-5.6-luna`   | `OPENROUTER_API_KEY`                               |
 
 For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vertex-project` / `--vertex-location` (or the `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION` environment variables).
 

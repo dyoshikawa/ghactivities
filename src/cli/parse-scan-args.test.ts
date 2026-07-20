@@ -28,7 +28,7 @@ describe("parseScanArgs", () => {
   it("defaults the provider to openai and picks its default model", () => {
     const result = parseScanArgs(["./out.json"], { OPENAI_API_KEY: "sk-env" });
     expect(result.provider).toBe("openai");
-    expect(result.model).toBe("gpt-4o-mini");
+    expect(result.model).toBe("gpt-5.6-luna");
     expect(result.apiKey).toBe("sk-env");
   });
 
