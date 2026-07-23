@@ -1,7 +1,9 @@
 ---
+name: draft-release-post
+description: >-
+  ghactivitiesのGitHubリリース情報から、日本語のX向けリリース告知文を作成する。リリースバージョン、リリースURL、または複数リリースの告知文を求められたときに使用する。
 targets:
   - "*"
-description: リリース告知のXポスト下書きを作成する
 ---
 
 # リリース告知Xポスト下書き作成
@@ -10,7 +12,7 @@ description: リリース告知のXポスト下書きを作成する
 
 ## 入力
 
-$ARGUMENTS にリリースバージョン（例: `v1.2.0`）またはGitHubリリースURL（例: `https://github.com/dyoshikawa/ghactivities/releases/tag/v1.2.0`）が渡される。複数のリリースが渡される場合もある（その場合は1つのXポストにまとめる）。
+ユーザーの依頼からリリースバージョン（例: `v1.2.0`）またはGitHubリリースURL（例: `https://github.com/dyoshikawa/ghactivities/releases/tag/v1.2.0`）を取得する。複数のリリースが指定された場合は1つのXポストにまとめる。
 
 ## 手順
 

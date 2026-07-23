@@ -121,13 +121,16 @@ RUN curl -fsSL https://github.com/AikidoSec/safe-chain/releases/latest/download/
 ENV PNPM_HOME=/home/node/.pnpm
 ENV npm_config_registry=https://npm.flatt.tech/
 ENV PATH=$PNPM_HOME/bin:$PATH
-RUN mkdir -p "$PNPM_HOME" && \
-    mise exec -- pnpm add -g \
-    @openai/codex \
-    @google/gemini-cli
+RUN mkdir -p "$PNPM_HOME"
 
 # Install Claude Code
 RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Install Codex CLI
+RUN mise exec -- pnpm add -g @openai/codex@0.145.0
+
+# Install Gemini CLI
+RUN mise exec -- pnpm add -g @google/gemini-cli@0.52.0
 
 # Install OpenCode
 RUN curl -fsSL https://opencode.ai/install | bash

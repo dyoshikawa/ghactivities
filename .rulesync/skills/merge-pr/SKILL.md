@@ -1,7 +1,10 @@
 ---
+name: merge-pr
+description: >-
+  Verify CI and merge one pull request with gh pr merge --admin, then clean up
+  its local branch. Use when asked to merge a PR after safety checks.
 targets:
   - "*"
-description: Merge a pull request using gh pr merge --admin
 ---
 
 # Merge Pull Request
@@ -10,13 +13,11 @@ Merge a pull request using `gh pr merge --admin`.
 
 ## Input
 
-```
-$ARGUMENTS
-```
+Resolve the pull request number or URL from the user's request.
 
 ## Step 1: Determine the Target PR
 
-Parse `$ARGUMENTS` to identify the PR to merge:
+Parse the user's request to identify the PR to merge:
 
 ### Case A: PR number or URL is provided
 
@@ -62,11 +63,11 @@ Check:
 1. All workflow checks show `pass` status
 2. No checks are `pending` or `fail`
 
-If any checks have failed or are still running, inform the user and ask whether to:
+If any checks have failed or are still running:
 
 - Wait for pending checks to complete
 - Investigate failed checks before merging
-- Proceed with merge anyway (using `--admin` will bypass required checks)
+- Do not merge until all checks pass
 
 ## Step 4: Merge the PR
 

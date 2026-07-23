@@ -1,7 +1,11 @@
 ---
+name: commit-push-pr
+description: >-
+  Commit current changes, push the branch, and create or update its pull
+  request. Use when asked to commit, push, open a PR, update a PR, or complete
+  that combined workflow.
 targets:
   - "*"
-description: "Commit current changes, push to remote, and create or update a pull request"
 ---
 
 # Commit, Push, and PR Management
@@ -18,9 +22,11 @@ If the current branch is `main` or `master`:
 ## Step 2: Stage and Commit Changes
 
 1. Run `git status` to check for changes
-2. If there are unstaged changes, stage them: `git add .`
-3. Analyze the changes and create a meaningful commit message
-4. Commit with: `git commit -m "<commit-message>"`
+2. Review the diff and preserve unrelated user changes
+3. Run `pnpm cicheck` and fix failures before committing
+4. Stage only the intended files
+5. Analyze the changes and create a meaningful commit message
+6. Commit with: `git commit -m "<commit-message>"`
 
 ## Step 3: Push to Remote
 

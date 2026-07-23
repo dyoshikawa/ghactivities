@@ -1,16 +1,18 @@
 ---
+name: create-issue
+description: >-
+  Research and create a GitHub issue with a detailed description, motivation,
+  acceptance criteria, and appropriate existing labels. Use when asked to
+  draft or open an issue.
 targets:
   - "*"
-description: >-
-  Create a GitHub issue with detailed description, purpose, and appropriate
-  labels
 ---
 
 # Create GitHub Issue
 
 ## Step 1: Gather Information
 
-Receive the issue topic from $ARGUMENTS or the user's description.
+Use the issue topic from the user's request.
 
 If the information is insufficient, ask the user to clarify the following:
 

@@ -1,19 +1,19 @@
 ---
+name: goal-pr
+description: >-
+  Drive a pull request to a clean state and merge it by repeatedly reviewing,
+  fixing every mid-or-above finding, and waiting for green CI. Use when asked
+  to finish, land, or fully resolve and merge a PR.
 targets:
   - "*"
-description: >-
-  Drive a pull request to a clean state and merge it: run /review-pr, fix every
-  mid-or-above finding, and repeat until no mid-or-above findings remain, then
-  merge. Use when the user wants to finish a PR by reviewing, fixing, and
-  merging it, or triggers on "/goal-pr".
 ---
 
-# Goal PR Command
+# Goal PR
 
-target_pr = $ARGUMENTS
+Resolve `target_pr` from the user's request.
 
-This command drives a pull request all the way to merge. It repeatedly runs
-`/review-pr`, fixes every finding of severity `mid` or above, and merges the PR
+This skill drives a pull request all the way to merge. It repeatedly uses
+the `review-pr` skill, fixes every finding of severity `mid` or above, and merges the PR
 once a review round reports no `mid`-or-above findings.
 
 ## 0. Determine and Prepare the Target PR
@@ -26,7 +26,7 @@ once a review round reports no `mid`-or-above findings.
    ```
 
 3. If no PR exists yet, create one (this satisfies the "PR is the goal" intent):
-   - Run the `/commit-push-pr` command to commit the current changes, push the
+   - Use the `commit-push-pr` skill to commit the current changes, push the
      branch, and open a PR.
    - Then resolve `target_pr` to the freshly created PR number.
 
@@ -53,11 +53,11 @@ Repeat the following until the exit condition is satisfied or the cap is hit.
 
 ### 2-1. Review Phase
 
-Run the `/review-pr` command with `target_pr`. It assigns each finding a
+Use the `review-pr` skill with `target_pr`. It assigns each finding a
 severity (`low` / `mid` / `high` / `critical`) and a sequential number, and also
 reports the GitHub Actions workflow status.
 
-Note: `/review-pr` only reads remote state and must not switch the local branch.
+Note: the `review-pr` skill only reads remote state and must not switch the local branch.
 Keep that constraint intact during the review phase.
 
 ### 2-2. Evaluate the Exit Condition
@@ -100,7 +100,7 @@ Emit a short status line such as
 ## 3. Merge
 
 Only reach this step once the exit condition in Section 1 holds — clean findings
-**and** green CI. Merge the PR by running the `/merge-pr` command with
+**and** green CI. Merge the PR by using the `merge-pr` skill with
 `target_pr`. That command verifies the PR is open, checks GitHub Actions status,
 merges with `gh pr merge --admin --merge`, and cleans up the local branch.
 
