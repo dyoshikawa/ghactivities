@@ -24,5 +24,9 @@
     ".opencode/memories/feature-change-guidelines.md",
     ".opencode/memories/testing-guidelines.md"
   ],
-  "permission": {}
+  "permission": {
+    "edit": {
+      ".": "allow"
+    }
+  }
 }

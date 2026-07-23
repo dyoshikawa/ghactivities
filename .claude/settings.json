@@ -12,6 +12,7 @@
       "Read(credentials/)"
     ],
     "allow": [
+      "Edit(.)",
       "mcp__modular-mcp",
       "mcp__serena"
     ],
