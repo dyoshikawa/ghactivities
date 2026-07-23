@@ -12,8 +12,8 @@
       "Read(credentials/)"
     ],
     "allow": [
-      "mcp__serena",
-      "mcp__modular-mcp"
+      "mcp__modular-mcp",
+      "mcp__serena"
     ],
     "defaultMode": "acceptEdits"
   },

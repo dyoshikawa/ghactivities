@@ -14,7 +14,7 @@
     "dist/**",
     "dist*/**",
     ".claude/settings.json",
-    ".rulesync/permissions.jsonc",
+    ".rulesync/permissions.json",
     ".codex/config.toml"
   ]
 }
