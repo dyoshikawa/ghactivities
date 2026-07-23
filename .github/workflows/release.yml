@@ -34,8 +34,8 @@ jobs:
           git fetch origin main --no-tags
           release_commit="$(git rev-parse 'HEAD^{commit}')"
           main_commit="$(git rev-parse 'origin/main^{commit}')"
-          if [ "$release_commit" != "$main_commit" ]; then
-            echo "Release commit $release_commit is not the current main commit $main_commit"
+          if ! git merge-base --is-ancestor "$release_commit" "$main_commit"; then
+            echo "Release commit $release_commit is not in the current main history"
             exit 1
           fi
 
