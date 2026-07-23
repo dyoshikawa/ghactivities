@@ -5,7 +5,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena",
+        "git+https://github.com/oraios/serena@ac256f36309dd01153389eb3828ae08d2ab9d705",
         "serena",
         "start-mcp-server",
         "--context",

@@ -127,7 +127,10 @@ RUN mkdir -p "$PNPM_HOME"
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Install Codex CLI
-RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh
+RUN mise exec -- pnpm add -g @openai/codex@0.145.0
+
+# Install Gemini CLI
+RUN mise exec -- pnpm add -g @google/gemini-cli@0.52.0
 
 # Install OpenCode
 RUN curl -fsSL https://opencode.ai/install | bash
