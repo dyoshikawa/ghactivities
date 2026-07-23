@@ -11,11 +11,21 @@ targets:
 
 # Goal Release
 
+<!-- cspell:ignore commitish -->
+
 Resolve `new_version` from the user's request.
 
 Drive a ghactivities release from preparation through publication. Use the `draft-release` skill to create the release branch, release PR, and draft GitHub release; require green CI before using the `merge-pr` skill; publish the draft release; then verify the `Release` workflow and npm package.
 
 ## 1. Draft the Release
+
+Require a clean worktree before invoking `draft-release`:
+
+```bash
+git status --porcelain
+```
+
+If this prints anything, stop and report the paths. Do not let pre-existing changes enter a release PR.
 
 Use the `draft-release` skill with `new_version`.
 
@@ -33,6 +43,15 @@ gh release view v<version> --json tagName,isDraft,url
 
 Require an open PR from `release/v<version>` into `main` and a draft release tagged `v<version>`. If the draft step stopped partway or any artifact does not match, stop and report the partial state. Do not guess or create missing artifacts outside the `draft-release` workflow.
 
+Audit the release PR before waiting for CI:
+
+```bash
+gh pr diff <pr> --name-only
+gh pr view <pr> --json commits,files
+```
+
+Require `package.json` to be the only changed file and require its diff to change only the top-level `version` field from the current released version to `<version>`. Require the commit list to contain only the expected release preparation commit or commits created by `draft-release`. If any other path, content change, or unexpected commit exists, stop and ask the user to confirm the exact diff. CI success never substitutes for this audit.
+
 ## 2. Wait for Release PR CI
 
 Watch the checks for the resolved release PR:
@@ -49,23 +68,32 @@ Checks may take a short time to register. If none are listed immediately after P
 - Never make CI pass by skipping or deleting tests, weakening lint or type-check settings, or changing GitHub Actions workflows.
 - Allow at most 3 CI-fix attempts. If CI remains red, stop and report the failing checks.
 
-If a fix adds commits beyond the version bump and release metadata produced by `draft-release`, stop before merging and ask the user to confirm those extra commits. Report their hashes and subjects.
+After every CI fix, repeat the changed-file, diff, and commit audit from Section 1. If a fix adds any path or content beyond the allowed `package.json` version change, stop before merging and ask the user to confirm the exact additional diff and commits. Report their hashes and subjects.
 
 ## 3. Merge the Release PR
 
 Use the `merge-pr` skill with the verified release PR.
 
-The release PR is expected to change `package.json` and release metadata. The `goal-pr` safeguard against automatically merging release or dependency changes does not apply here because invoking `goal-release` explicitly authorizes the verified release PR workflow. It does not authorize merging any other PR or unrelated changes.
+The release PR is expected to change only the version in `package.json`. The `goal-pr` safeguard against automatically merging release or dependency changes does not apply here because invoking `goal-release` explicitly authorizes the verified release PR workflow. It does not authorize merging any other PR or unrelated changes.
 
-After merging, verify that the PR state is `MERGED`. If the merge fails or the PR changes identity, stop and report without publishing the release.
+After merging, verify that the PR state is `MERGED` and record its `mergeCommit.oid`:
+
+```bash
+gh pr view <pr> --json state,mergeCommit
+```
+
+If the merge fails, the merge commit is missing, or the PR changes identity, stop and report without publishing the release.
 
 ## 4. Publish the Draft Release
 
-Re-read the draft release and confirm that its tag is exactly `v<version>` and it is still a draft:
+Re-read the draft release and confirm that its tag is exactly `v<version>` and it is still a draft. Also retrieve its `target_commitish` and the current `main` SHA:
 
 ```bash
-gh release view v<version> --json tagName,isDraft,url
+gh api repos/{owner}/{repo}/releases/tags/v<version> --jq '{tag_name,draft,target_commitish,html_url}'
+gh api repos/{owner}/{repo}/git/ref/heads/main --jq .object.sha
 ```
+
+Require the current `main` SHA to equal the release PR's recorded merge commit. Resolve `target_commitish`: if it is a branch name such as `main`, resolve that ref to a commit SHA; if it is already a SHA, use it directly. Require the resolved target SHA to equal the same merge commit. Stop before publication if any value differs. This check prevents publishing a draft that targets stale or unrelated code.
 
 Publish that existing draft release:
 
