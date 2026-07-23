@@ -13,6 +13,7 @@
     "node_modules/**",
     "dist/**",
     "dist*/**",
-    ".claude/settings.json"
+    ".claude/settings.json",
+    ".rulesync/permissions.jsonc"
   ]
 }
