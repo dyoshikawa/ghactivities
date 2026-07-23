@@ -1,4 +1,4 @@
-default_permissions = "rulesync"
+default_permissions = ":danger-full-access"
 approval_policy = "on-request"
 approvals_reviewer = "auto_review"
 
@@ -6,12 +6,3 @@ approvals_reviewer = "auto_review"
 type = "stdio"
 command = "uvx"
 args = [ "--from", "git+https://github.com/oraios/serena@ac256f36309dd01153389eb3828ae08d2ab9d705", "serena", "start-mcp-server", "--context", "ide-assistant", "--enable-web-dashboard", "false", "--project", "." ]
-
-[permissions.rulesync]
-extends = ":workspace"
-
-[permissions.rulesync.filesystem]
-":minimal" = "read"
-
-[permissions.rulesync.filesystem.":workspace_roots"]
-"." = "write"
