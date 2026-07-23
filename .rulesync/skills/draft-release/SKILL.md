@@ -15,9 +15,9 @@ First, let's work on the following steps.
 - Sections `What's Changed`, `Contributors` and `Full Changelog` are needed.
 - `./tmp/release-notes/*.md` will be used as the release notes.
 
-Then, from `$ARGUMENTS`, get the new version without the `v` prefix and assign it to `$new_version`. For example, if `$ARGUMENTS` is "v1.0.0", the new version is "1.0.0".
+Then, get the requested new version from the user's request without the `v` prefix and assign it to `$new_version`. For example, if the request specifies "v1.0.0", the new version is "1.0.0".
 
-If `$ARGUMENTS` is empty, determine the new version automatically by analyzing the diff and applying semantic-versioning rules: a breaking change bumps the major, a new feature bumps the minor, and a bug fix bumps the patch.
+If the user does not specify a version, determine it automatically by analyzing the diff and applying semantic-versioning rules: a breaking change bumps the major, a new feature bumps the minor, and a bug fix bumps the patch.
 
 Let's resume the release process.
 

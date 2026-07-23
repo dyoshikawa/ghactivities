@@ -1,5 +1,9 @@
 ---
-description: "Release a new version of the project."
+name: release
+description: >-
+  Release a new ghactivities version end to end, including version selection,
+  checks, release PR, GitHub release, workflow monitoring, and branch cleanup.
+  Use when asked to publish or perform a production release.
 targets:
   - "*"
 ---
@@ -14,7 +18,7 @@ First, let's work on the following steps.
 - Sections `What's Changed`, `Contributors` and `Full Changelog` are needed.
 - `./tmp/release-notes.md` will be used as the release notes.
 
-Then, from `$ARGUMENTS`, get the new version without the `v` prefix and assign it to `$new_version`. For example, if `$ARGUMENTS` is "v1.0.0", the new version is "1.0.0".
+Then, get the requested new version from the user's request without the `v` prefix and assign it to `$new_version`. For example, if the request specifies "v1.0.0", the new version is "1.0.0".
 
 Unless the user explicitly specifies the new version, determine `$new_version` from the release description by applying the general semantic-versioning rules (a breaking change bumps the major, a new feature bumps the minor, and a bug fix bumps the patch).
 

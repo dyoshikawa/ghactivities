@@ -1,10 +1,14 @@
 ---
-description: "Dry run for release: summarize changes since last release and suggest version bump."
+name: release-dry-run
+description: >-
+  Summarize changes since the latest release and recommend a semantic-version
+  bump without modifying files or publishing. Use when asked for a release dry
+  run or version recommendation.
 targets:
   - "*"
 ---
 
-This is a dry run command for release. It will summarize the changes since the last release and suggest the appropriate version bump based on semantic versioning.
+Summarize the changes since the last release and suggest the appropriate version bump based on semantic versioning.
 
 ## Steps
 

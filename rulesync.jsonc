@@ -1,13 +1,10 @@
 {
-  "targets": ["claudecode", "opencode"],
-  "features": ["rules", "ignore", "mcp", "commands", "subagents", "skills"],
-  "baseDirs": ["."],
+  "$schema": "https://github.com/dyoshikawa/rulesync/releases/latest/download/config-schema.json",
+  "targets": ["claudecode", "opencode", "codexcli"],
+  "features": ["rules", "mcp", "subagents", "skills"],
+  "inputRoot": ".",
   "delete": true,
   "verbose": false,
   "silent": false,
   "global": false,
-  "simulateCommands": false,
-  "simulateSubagents": false,
-  "simulateSkills": false,
-  "modularMcp": false,
 }

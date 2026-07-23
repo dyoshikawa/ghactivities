@@ -1,0 +1,19 @@
+default_permissions = ":danger-full-access"
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
+
+[mcp_servers.serena]
+type = "stdio"
+command = "uvx"
+args = [
+  "--from",
+  "git+https://github.com/oraios/serena",
+  "serena",
+  "start-mcp-server",
+  "--context",
+  "ide-assistant",
+  "--enable-web-dashboard",
+  "false",
+  "--project",
+  ".",
+]

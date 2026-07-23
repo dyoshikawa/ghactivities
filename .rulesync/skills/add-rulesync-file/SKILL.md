@@ -1,26 +1,26 @@
 ---
+name: add-rulesync-file
+description: >-
+  Create or update a Rulesync source file (rule, command, subagent, skill,
+  ignore, mcp, permissions, or hooks) with the Rulesync MCP Server. Use when
+  asked to add or modify project configuration under .rulesync.
 targets:
   - "*"
-description: >-
-  Create a Rulesync file (rule, command, subagent, skill, ignore, or mcp) using
-  the Rulesync MCP Server
 ---
 
 # Add Rulesync File
 
-Create a Rulesync file based on the user's request using the Rulesync MCP Server.
+Create or update a Rulesync source file based on the user's request using the Rulesync MCP Server.
 
 ## Input
 
-```
-$ARGUMENTS
-```
+Use the user's current request as input.
 
 ## Step 1: Analyze the Request
 
-Parse `$ARGUMENTS` to determine:
+Parse the user's request to determine:
 
-1. **File type**: rule, command, subagent, skill, ignore, or mcp
+1. **File type**: rule, command, subagent, skill, ignore, mcp, permissions, or hooks
 2. **File name**: The name/path of the file to create
 3. **Frontmatter**: Required metadata fields
 4. **Body content**: The main content of the file
@@ -62,11 +62,15 @@ If any of the following is unclear or missing, ask the user:
 - What MCP servers should be configured?
 - What are the commands and arguments for each server?
 
+### For permissions or hooks files:
+
+- What permissions or lifecycle hooks should be configured?
+
 ## Step 3: Create the File
 
 Use the Rulesync MCP Server's `rulesyncTool` with the following parameters:
 
-- `feature`: The file type (rule, command, subagent, skill, ignore, or mcp)
+- `feature`: The file type (rule, command, subagent, skill, ignore, mcp, permissions, or hooks)
 - `operation`: "put"
 - `targetPathFromCwd`: The file path
 - `frontmatter`: The metadata object (for rule/command/subagent/skill)
@@ -79,4 +83,4 @@ After creating the file, confirm to the user:
 
 1. The file path that was created
 2. A summary of the frontmatter and content
-3. Remind them to run `rulesync generate` to apply changes to target tools
+3. Run `pnpm generate` to apply changes to target tools

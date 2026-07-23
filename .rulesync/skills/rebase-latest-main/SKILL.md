@@ -1,9 +1,10 @@
 ---
-targets:
-  - "*"
+name: rebase-latest-main
 description: >-
   Fetch latest origin/main and rebase it onto the current branch, resolving
   conflicts if necessary
+targets:
+  - "*"
 ---
 
 # Rebase Latest Main
