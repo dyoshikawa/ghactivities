@@ -6,6 +6,13 @@ import { generateText, type LanguageModel } from "ai";
 
 import type { ScanConfig } from "../types/scan.js";
 
+import { countTokens } from "../utils/count-tokens.js";
+
+// Upper bound on the scan input, counted with cl100k_base. Provider context
+// windows vary, but sending more than this is almost certain to fail or be
+// truncated; failing fast beats a raw provider error after a full upload.
+export const MAX_SCAN_INPUT_TOKENS = 200_000;
+
 const SYSTEM_PROMPT = `You are an assistant that reviews a developer's GitHub activity.
 The user provides a JSON export of their activity (issues, issue comments, discussions,
 discussion comments, pull requests, pull request comments, and commits).
@@ -51,6 +58,14 @@ export async function scanActivities(params: {
   content: string;
 }): Promise<string> {
   const { config, content } = params;
+
+  const inputTokens = countTokens(content);
+  if (inputTokens > MAX_SCAN_INPUT_TOKENS) {
+    throw new Error(
+      `Scan input is ~${String(inputTokens)} tokens, which exceeds the ${String(MAX_SCAN_INPUT_TOKENS)}-token limit. ` +
+        `Narrow the collection range (--since/--until) or scan fewer files at a time.`,
+    );
+  }
 
   const model = buildModel({
     provider: config.provider,

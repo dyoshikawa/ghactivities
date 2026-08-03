@@ -35,8 +35,12 @@ export async function readActivities(params: { path: string }): Promise<ReadActi
 async function listJsonFiles(params: { dir: string }): Promise<string[]> {
   const { dir } = params;
   const entries = await readdir(dir, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => join(dir, entry.name))
-    .toSorted((a, b) => a.localeCompare(b));
+  return (
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => join(dir, entry.name))
+      // Numeric-aware ordering so split files read chronologically:
+      // a plain lexicographic sort would order _10 before _2.
+      .toSorted((a, b) => a.localeCompare(b, "en", { numeric: true }))
+  );
 }
