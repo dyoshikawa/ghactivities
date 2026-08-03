@@ -41,6 +41,9 @@ async function main(): Promise<void> {
       since: options.since,
       until: options.until,
       visibility: options.visibility,
+      onWarning: (message) => {
+        p.log.warn(message);
+      },
     });
 
     s.start("Fetching events from GitHub...");

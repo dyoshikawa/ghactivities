@@ -6,11 +6,14 @@ import { GitHubService } from "./github.js";
 // can assert none of them uses a reserved variable key, and exposes a mutable
 // node list served to the issue-comment search. Declared via vi.hoisted so
 // both are available inside the (hoisted) vi.mock factory below.
-const { calls, issueCommentSearchNodes, commentPagesByCursor } = vi.hoisted(() => ({
-  calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
-  issueCommentSearchNodes: [] as unknown[],
-  commentPagesByCursor: new Map<string, unknown>(),
-}));
+const { calls, issueCommentSearchNodes, commentPagesByCursor, searchResponsesByQuery } = vi.hoisted(
+  () => ({
+    calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
+    issueCommentSearchNodes: [] as unknown[],
+    commentPagesByCursor: new Map<string, unknown>(),
+    searchResponsesByQuery: new Map<string, unknown>(),
+  }),
+);
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
 // each query the service issues, and records the (query, variables) pairs.
@@ -35,6 +38,8 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("search(type:")) {
       const searchQuery = String(variables.searchQuery ?? "");
+      const preset = searchResponsesByQuery.get(searchQuery);
+      if (preset) return Promise.resolve({ search: preset });
       const isIssueCommentSearch =
         searchQuery.includes("commenter:") && searchQuery.includes("is:issue");
       return Promise.resolve({
@@ -59,18 +64,24 @@ beforeEach(() => {
   calls.length = 0;
   issueCommentSearchNodes.length = 0;
   commentPagesByCursor.clear();
+  searchResponsesByQuery.clear();
 });
 
-const makeService = () =>
+const makeService = (params?: {
+  since?: Date;
+  until?: Date;
+  onWarning?: (message: string) => void;
+}) =>
   new GitHubService({
     token: "test-token",
-    since: new Date("2024-01-01T00:00:00Z"),
-    until: new Date("2024-01-15T00:00:00Z"),
+    since: params?.since ?? new Date("2024-01-01T00:00:00Z"),
+    until: params?.until ?? new Date("2024-01-15T00:00:00Z"),
     visibility: "public",
+    ...(params?.onWarning ? { onWarning: params.onWarning } : {}),
   });
 
 describe("search date qualifiers", () => {
-  it("bounds author searches by created: and commenter searches by updated:>= only", async () => {
+  it("bounds author searches by a created: range and commenter searches by an updated: window", async () => {
     await makeService().fetchAllEvents();
 
     const searchQueries = calls
@@ -87,12 +98,12 @@ describe("search date qualifiers", () => {
     }
     // A lower `created:` bound on a commenter search would match the parent
     // item's creation date and silently drop comments left on older items;
-    // only the upper bound `created:<=until` is safe.
+    // only the upper bound `created:<=until` is safe. The `updated:` window
+    // starts at --since and reaches the present day.
     for (const searchQuery of commenterQueries) {
-      expect(searchQuery).toContain("updated:>=2024-01-01");
+      expect(searchQuery).toContain("updated:2024-01-01..");
       expect(searchQuery).toContain("created:<=2024-01-15");
       expect(searchQuery).not.toContain("created:2024-01-01..2024-01-15");
-      expect(searchQuery).not.toContain("updated:>=2024-01-01..");
     }
   });
 
@@ -208,6 +219,64 @@ describe("search date qualifiers", () => {
       { nodeId: "ISSUE_NODE_ID", first: 100, after: "CURSOR_PAGE_2" },
       { nodeId: "ISSUE_NODE_ID", first: 100, after: "CURSOR_PAGE_3" },
     ]);
+  });
+});
+
+const issueNode = (title: string) => ({
+  title,
+  url: `https://github.com/owner/repo/issues/${title}`,
+  body: "",
+  createdAt: "2024-01-02T00:00:00Z",
+  repository: { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" },
+});
+
+describe("search result cap handling", () => {
+  it("splits the date window in half when the result count exceeds the cap", async () => {
+    const warnings: string[] = [];
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+      issueCount: 1500,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("discarded-oversized-page")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-08", {
+      issueCount: 800,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-half")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 700,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-half", "second-half"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns instead of silently truncating when a single UTC day exceeds the cap", async () => {
+    const warnings: string[] = [];
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-05..2024-01-05", {
+      issueCount: 1500,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("capped-day")],
+    });
+
+    const events = await makeService({
+      since: new Date("2024-01-05T00:00:00Z"),
+      until: new Date("2024-01-05T23:59:59Z"),
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["capped-day"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("1000");
+    expect(warnings[0]).toContain("author:testuser is:issue created:2024-01-05..2024-01-05");
   });
 });
 

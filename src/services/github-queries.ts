@@ -9,6 +9,7 @@ export const VIEWER_QUERY = `
 export const ISSUE_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
+      issueCount
       pageInfo {
         hasNextPage
         endCursor
@@ -33,6 +34,7 @@ export const ISSUE_SEARCH_QUERY = `
 export const ISSUE_COMMENT_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
+      issueCount
       pageInfo {
         hasNextPage
         endCursor
@@ -69,6 +71,7 @@ export const ISSUE_COMMENT_SEARCH_QUERY = `
 export const DISCUSSION_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: DISCUSSION, query: $searchQuery, first: $first, after: $after) {
+      discussionCount
       pageInfo {
         hasNextPage
         endCursor
@@ -93,6 +96,7 @@ export const DISCUSSION_SEARCH_QUERY = `
 export const DISCUSSION_COMMENT_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: DISCUSSION, query: $searchQuery, first: $first, after: $after) {
+      discussionCount
       pageInfo {
         hasNextPage
         endCursor
@@ -129,6 +133,7 @@ export const DISCUSSION_COMMENT_SEARCH_QUERY = `
 export const PULL_REQUEST_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
+      issueCount
       pageInfo {
         hasNextPage
         endCursor
@@ -153,6 +158,7 @@ export const PULL_REQUEST_SEARCH_QUERY = `
 export const PULL_REQUEST_COMMENT_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
+      issueCount
       pageInfo {
         hasNextPage
         endCursor
