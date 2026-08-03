@@ -7,45 +7,60 @@ import packageJson from "../../package.json" with { type: "json" };
 import { parseSize } from "../utils/parse-size.js";
 import { resolveScanConfig } from "./parse-scan-args.js";
 
-const ArgsSchema = z.object({
-  githubToken: z.optional(z.string()),
-  output: z.string(),
-  since: z.string().check(
-    z.refine((v) => !Number.isNaN(Date.parse(v)), {
-      message: "Invalid ISO8601 date format for --since",
-    }),
-  ),
-  until: z.string().check(
-    z.refine((v) => !Number.isNaN(Date.parse(v)), {
-      message: "Invalid ISO8601 date format for --until",
-    }),
-  ),
-  visibility: z.enum(["public", "private", "all"]),
-  maxLengthSize: z.string().check(
-    z.refine(
-      (v) => {
-        try {
-          parseSize(v);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      {
-        message:
-          "Invalid size format for --max-length-size. Expected format: <number><unit> (e.g., 1B, 2K, 2M)",
-      },
-    ),
-  ),
-  maxTokens: z.optional(
-    z.string().check(
-      z.refine((v) => /^\d+$/.test(v.trim()) && Number(v.trim()) > 0, {
-        message: "Invalid value for --max-tokens. Expected a positive integer (e.g., 1000).",
+const ArgsSchema = z
+  .object({
+    githubToken: z.optional(z.string()),
+    output: z.string(),
+    since: z.string().check(
+      z.refine((v) => !Number.isNaN(Date.parse(v)), {
+        message: "Invalid ISO8601 date format for --since",
       }),
     ),
-  ),
-  order: z.enum(["asc", "desc"]),
-});
+    until: z.string().check(
+      z.refine((v) => !Number.isNaN(Date.parse(v)), {
+        message: "Invalid ISO8601 date format for --until",
+      }),
+    ),
+    visibility: z.enum(["public", "private", "all"]),
+    maxLengthSize: z.string().check(
+      z.refine(
+        (v) => {
+          try {
+            parseSize(v);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        {
+          message:
+            "Invalid size format for --max-length-size. Expected format: <number><unit> (e.g., 1B, 2K, 2M)",
+        },
+      ),
+    ),
+    maxTokens: z.optional(
+      z.string().check(
+        z.refine((v) => /^\d+$/.test(v.trim()) && Number(v.trim()) > 0, {
+          message: "Invalid value for --max-tokens. Expected a positive integer (e.g., 1000).",
+        }),
+      ),
+    ),
+    order: z.enum(["asc", "desc"]),
+  })
+  .check(
+    // A reversed range would silently match nothing everywhere (search
+    // qualifiers, commit periods) and produce an empty result with exit code 0.
+    // Unparsable dates are left to the field-level checks so a malformed date
+    // does not also produce a misleading reversed-range error.
+    z.refine(
+      (args) => {
+        const since = Date.parse(args.since);
+        const until = Date.parse(args.until);
+        return Number.isNaN(since) || Number.isNaN(until) || since <= until;
+      },
+      { message: "--since must not be after --until" },
+    ),
+  );
 
 function getDefaultSince(): string {
   const d = new Date();
@@ -131,7 +146,7 @@ Usage: ghactivities [options]
 Options:
   --github-token      GitHub access token (env: GITHUB_TOKEN or "gh auth token")
   --output            Output file path (default: ./ghactivities.json)
-  --since             Start date in ISO8601 format (default: 2 weeks ago)
+  --since             Start date in ISO8601 format; must not be after --until (default: 2 weeks ago)
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
   --max-length-size   Max output file size: e.g., 1B, 2K, 2M (default: 1M)
