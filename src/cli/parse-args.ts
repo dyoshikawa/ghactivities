@@ -50,9 +50,16 @@ const ArgsSchema = z
   .check(
     // A reversed range would silently match nothing everywhere (search
     // qualifiers, commit periods) and produce an empty result with exit code 0.
-    z.refine((args) => Date.parse(args.since) <= Date.parse(args.until), {
-      message: "--since must not be after --until",
-    }),
+    // Unparsable dates are left to the field-level checks so a malformed date
+    // does not also produce a misleading reversed-range error.
+    z.refine(
+      (args) => {
+        const since = Date.parse(args.since);
+        const until = Date.parse(args.until);
+        return Number.isNaN(since) || Number.isNaN(until) || since <= until;
+      },
+      { message: "--since must not be after --until" },
+    ),
   );
 
 function getDefaultSince(): string {
@@ -139,7 +146,7 @@ Usage: ghactivities [options]
 Options:
   --github-token      GitHub access token (env: GITHUB_TOKEN or "gh auth token")
   --output            Output file path (default: ./ghactivities.json)
-  --since             Start date in ISO8601 format (default: 2 weeks ago)
+  --since             Start date in ISO8601 format; must not be after --until (default: 2 weeks ago)
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
   --max-length-size   Max output file size: e.g., 1B, 2K, 2M (default: 1M)

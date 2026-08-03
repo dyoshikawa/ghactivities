@@ -90,6 +90,17 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["--since", "not-a-date"])).toThrow();
   });
 
+  it("does not report a reversed range for a malformed --since", () => {
+    let message = "";
+    try {
+      parseCliArgs(["--since", "not-a-date"]);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("Invalid ISO8601 date format for --since");
+    expect(message).not.toContain("must not be after");
+  });
+
   it("throws when --since is after --until", () => {
     expect(() =>
       parseCliArgs(["--since", "2025-06-01T00:00:00Z", "--until", "2025-01-01T00:00:00Z"]),
