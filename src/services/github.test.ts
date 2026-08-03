@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { GitHubService } from "./github.js";
+import { computeRetryDelayMs, GitHubService } from "./github.js";
 
 // Records every call the GitHubService makes to @octokit/graphql so the test
 // can assert none of them uses a reserved variable key, and exposes a mutable
@@ -84,7 +84,7 @@ const makeService = (params?: {
   until?: Date;
   visibility?: "public" | "private" | "all";
   onWarning?: (message: string) => void;
-  retry?: { maxAttempts?: number; baseDelayMs?: number };
+  retry?: { maxRetries?: number; baseDelayMs?: number };
 }) =>
   new GitHubService({
     token: "test-token",
@@ -427,6 +427,42 @@ describe("transient failure handling", () => {
       makeService({ onWarning: (message) => warnings.push(message) }).fetchAllEvents(),
     ).rejects.toThrow("Failed to fetch issues: Bad credentials");
     expect(warnings).toEqual([]);
+  });
+});
+
+describe("computeRetryDelayMs", () => {
+  it("honors retry-after from RequestError-shaped errors (response.headers)", () => {
+    const delay = computeRetryDelayMs({
+      error: { response: { headers: { "retry-after": "5" } } },
+      attempt: 0,
+      baseDelayMs: 1000,
+    });
+    expect(delay).toBe(5000);
+  });
+
+  it("honors top-level headers from GraphqlResponseError-shaped errors", () => {
+    const delay = computeRetryDelayMs({
+      error: { headers: { "retry-after": 7 } },
+      attempt: 0,
+      baseDelayMs: 1000,
+    });
+    expect(delay).toBe(7000);
+  });
+
+  it("waits until x-ratelimit-reset, capped at one minute", () => {
+    const resetInTwoMinutes = Math.round(Date.now() / 1000) + 120;
+    const delay = computeRetryDelayMs({
+      error: { headers: { "x-ratelimit-reset": resetInTwoMinutes } },
+      attempt: 0,
+      baseDelayMs: 1000,
+    });
+    expect(delay).toBe(60_000);
+  });
+
+  it("falls back to exponential backoff and rejects malformed header values", () => {
+    const error = { headers: { "retry-after": "soon", "x-ratelimit-reset": "-5" } };
+    expect(computeRetryDelayMs({ error, attempt: 0, baseDelayMs: 1000 })).toBe(1000);
+    expect(computeRetryDelayMs({ error, attempt: 2, baseDelayMs: 1000 })).toBe(4000);
   });
 });
 

@@ -50,7 +50,7 @@ interface GitHubServiceParams {
   visibility: Visibility;
   onWarning?: (message: string) => void;
   retry?: {
-    maxAttempts?: number;
+    maxRetries?: number;
     baseDelayMs?: number;
   };
 }
@@ -59,17 +59,19 @@ interface GitHubServiceParams {
 const SEARCH_RESULT_CAP = 1000;
 
 // Retry policy for transient GitHub API failures.
-const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 60_000;
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
 
 // The relevant fields of errors thrown by @octokit/graphql: RequestError
-// exposes `status` and `response.headers`; GraphqlResponseError exposes the
-// GraphQL `errors` array (rate limiting surfaces as type RATE_LIMITED).
+// (HTTP 4xx/5xx) exposes `status` and `response.headers`, while
+// GraphqlResponseError (HTTP 200 with an errors array, e.g. RATE_LIMITED)
+// exposes the response headers as a top-level `headers` property.
 interface GitHubApiErrorShape {
   status?: number;
   message?: string;
+  headers?: Record<string, string | number | undefined>;
   response?: { headers?: Record<string, string | number | undefined> };
   errors?: { type?: string }[];
 }
@@ -81,6 +83,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetryableError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
   const err = error as GitHubApiErrorShape;
   if (err.errors?.some((graphqlError) => graphqlError.type === "RATE_LIMITED")) return true;
   if (typeof err.status !== "number") return false;
@@ -89,13 +92,33 @@ function isRetryableError(error: unknown): boolean {
   return err.status === 403 && /rate limit|abuse/i.test(err.message ?? "");
 }
 
+// Exported for direct unit testing (no real sleeps needed).
+export function computeRetryDelayMs(params: {
+  error: unknown;
+  attempt: number;
+  baseDelayMs: number;
+}): number {
+  const err = params.error as GitHubApiErrorShape;
+  const headers = err.response?.headers ?? err.headers ?? {};
+  const retryAfterSeconds = Number(headers["retry-after"]);
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return Math.min(retryAfterSeconds * 1000, MAX_RETRY_DELAY_MS);
+  }
+  const resetEpochSeconds = Number(headers["x-ratelimit-reset"]);
+  if (Number.isFinite(resetEpochSeconds) && resetEpochSeconds > 0) {
+    const waitMs = resetEpochSeconds * 1000 - Date.now();
+    if (waitMs > 0) return Math.min(waitMs, MAX_RETRY_DELAY_MS);
+  }
+  return Math.min(params.baseDelayMs * 2 ** params.attempt, MAX_RETRY_DELAY_MS);
+}
+
 export class GitHubService {
   private readonly graphqlWithAuth: typeof graphql;
   private readonly since: Date;
   private readonly until: Date;
   private readonly visibility: Visibility;
   private readonly onWarning: (message: string) => void;
-  private readonly retryMaxAttempts: number;
+  private readonly maxRetries: number;
   private readonly retryBaseDelayMs: number;
 
   constructor(params: GitHubServiceParams) {
@@ -106,12 +129,17 @@ export class GitHubService {
     this.until = params.until;
     this.visibility = params.visibility;
     this.onWarning = params.onWarning ?? (() => {});
-    this.retryMaxAttempts = params.retry?.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
+    this.maxRetries = params.retry?.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryBaseDelayMs = params.retry?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
   }
 
   async fetchAllEvents(): Promise<GitHubEvent[]> {
-    const username = await this.getViewerLogin();
+    let username: string;
+    try {
+      username = await this.getViewerLogin();
+    } catch (error) {
+      throw new Error(`Failed to fetch viewer login: ${formatError(error)}`, { cause: error });
+    }
 
     // Fetchers run one at a time: GitHub's secondary rate-limit guidance is to
     // avoid concurrent requests, and each fetcher already pages sequentially.
@@ -146,28 +174,18 @@ export class GitHubService {
       try {
         return await this.graphqlWithAuth<T>(query, variables ?? {});
       } catch (error) {
-        if (attempt >= this.retryMaxAttempts || !isRetryableError(error)) throw error;
-        const delayMs = this.retryDelayMs(error, attempt);
+        if (attempt >= this.maxRetries || !isRetryableError(error)) throw error;
+        const delayMs = computeRetryDelayMs({
+          error,
+          attempt,
+          baseDelayMs: this.retryBaseDelayMs,
+        });
         this.onWarning(
-          `GitHub API request failed (${formatError(error)}); retrying in ${String(Math.ceil(delayMs / 1000))}s (attempt ${String(attempt + 1)}/${String(this.retryMaxAttempts)}).`,
+          `GitHub API request failed (${formatError(error)}); retrying in ${String(Math.ceil(delayMs / 1000))}s (retry ${String(attempt + 1)}/${String(this.maxRetries)}).`,
         );
         await sleep(delayMs);
       }
     }
-  }
-
-  private retryDelayMs(error: unknown, attempt: number): number {
-    const headers = (error as GitHubApiErrorShape).response?.headers ?? {};
-    const retryAfterSeconds = Number(headers["retry-after"]);
-    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-      return Math.min(retryAfterSeconds * 1000, MAX_RETRY_DELAY_MS);
-    }
-    const resetEpochSeconds = Number(headers["x-ratelimit-reset"]);
-    if (Number.isFinite(resetEpochSeconds) && resetEpochSeconds > 0) {
-      const waitMs = resetEpochSeconds * 1000 - Date.now();
-      if (waitMs > 0) return Math.min(waitMs, MAX_RETRY_DELAY_MS);
-    }
-    return Math.min(this.retryBaseDelayMs * 2 ** attempt, MAX_RETRY_DELAY_MS);
   }
 
   private async getViewerLogin(): Promise<string> {
