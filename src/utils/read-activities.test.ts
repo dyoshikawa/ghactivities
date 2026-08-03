@@ -37,6 +37,16 @@ describe("readActivities", () => {
     expect(result.content).not.toContain("ignored");
   });
 
+  it("orders split files numerically so _10 comes after _2", async () => {
+    const names = [1, 2, 3, 9, 10, 11, 12].map((n) => `ghactivities_${String(n)}.json`);
+    for (const name of names.toReversed()) {
+      await writeFile(join(dir, name), `["${name}"]`, "utf-8");
+    }
+
+    const result = await readActivities({ path: dir });
+    expect(result.files).toEqual(names.map((name) => join(dir, name)));
+  });
+
   it("throws when a directory has no .json files", async () => {
     await writeFile(join(dir, "note.txt"), "x", "utf-8");
     await expect(readActivities({ path: dir })).rejects.toThrow(/no .json files/i);

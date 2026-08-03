@@ -6,6 +6,20 @@ import { generateText, type LanguageModel } from "ai";
 
 import type { ScanConfig } from "../types/scan.js";
 
+import { countTokens } from "../utils/count-tokens.js";
+
+// Conservative per-provider upper bounds on the scan input, counted with
+// cl100k_base. These sit safely inside each provider's default-model context
+// window (Gemini models take ~1M tokens; the others considerably less), so
+// oversized input fails fast with an actionable message instead of a raw
+// provider error after a full upload attempt.
+export const MAX_SCAN_INPUT_TOKENS: Record<ScanConfig["provider"], number> = {
+  openai: 200_000,
+  google: 800_000,
+  vertexai: 800_000,
+  openrouter: 200_000,
+};
+
 const SYSTEM_PROMPT = `You are an assistant that reviews a developer's GitHub activity.
 The user provides a JSON export of their activity (issues, issue comments, discussions,
 discussion comments, pull requests, pull request comments, and commits).
@@ -51,6 +65,15 @@ export async function scanActivities(params: {
   content: string;
 }): Promise<string> {
   const { config, content } = params;
+
+  const maxInputTokens = MAX_SCAN_INPUT_TOKENS[config.provider];
+  const inputTokens = countTokens(content);
+  if (inputTokens > maxInputTokens) {
+    throw new Error(
+      `Scan input is ~${String(inputTokens)} tokens, which exceeds the ${String(maxInputTokens)}-token limit for provider ${config.provider}. ` +
+        `Narrow the collection range (--since/--until) to reduce the input.`,
+    );
+  }
 
   const model = buildModel({
     provider: config.provider,
