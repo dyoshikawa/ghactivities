@@ -6,9 +6,10 @@ import { GitHubService } from "./github.js";
 // can assert none of them uses a reserved variable key, and exposes a mutable
 // node list served to the issue-comment search. Declared via vi.hoisted so
 // both are available inside the (hoisted) vi.mock factory below.
-const { calls, issueCommentSearchNodes } = vi.hoisted(() => ({
+const { calls, issueCommentSearchNodes, commentPagesByCursor } = vi.hoisted(() => ({
   calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
   issueCommentSearchNodes: [] as unknown[],
+  commentPagesByCursor: new Map<string, unknown>(),
 }));
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
@@ -24,6 +25,13 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("defaultBranchRef")) {
       return Promise.resolve({ repository: { defaultBranchRef: null } });
+    }
+    // Nested comment pagination: serves the comment page registered for the
+    // requested cursor. Must be checked before the viewer-id fallback because
+    // this query text also contains "id".
+    if (query.includes("node(id:")) {
+      const page = commentPagesByCursor.get(String(variables.after ?? ""));
+      return Promise.resolve({ node: page ? { comments: page } : null });
     }
     if (query.includes("search(type:")) {
       const searchQuery = String(variables.searchQuery ?? "");
@@ -50,6 +58,7 @@ vi.mock("@octokit/graphql", () => {
 beforeEach(() => {
   calls.length = 0;
   issueCommentSearchNodes.length = 0;
+  commentPagesByCursor.clear();
 });
 
 const makeService = () =>
@@ -89,6 +98,7 @@ describe("search date qualifiers", () => {
 
   it("collects an in-range comment on an issue created before the range", async () => {
     issueCommentSearchNodes.push({
+      id: "ISSUE_NODE_ID",
       title: "Old issue",
       url: "https://github.com/owner/repo/issues/1",
       createdAt: "2023-06-01T00:00:00Z",
@@ -131,6 +141,72 @@ describe("search date qualifiers", () => {
         url: "https://github.com/owner/repo/issues/1#issuecomment-1",
         repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
       },
+    ]);
+  });
+
+  it("paginates nested comments so in-range comments beyond the first page are collected", async () => {
+    issueCommentSearchNodes.push({
+      id: "ISSUE_NODE_ID",
+      title: "Busy issue",
+      url: "https://github.com/owner/repo/issues/2",
+      createdAt: "2023-06-01T00:00:00Z",
+      repository: { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" },
+      comments: {
+        pageInfo: { hasNextPage: true, endCursor: "CURSOR_PAGE_2" },
+        nodes: [
+          {
+            body: "old comment on the first page",
+            url: "https://github.com/owner/repo/issues/2#issuecomment-1",
+            createdAt: "2023-07-01T00:00:00Z",
+            author: { login: "testuser" },
+          },
+        ],
+      },
+    });
+    commentPagesByCursor.set("CURSOR_PAGE_2", {
+      pageInfo: { hasNextPage: true, endCursor: "CURSOR_PAGE_3" },
+      nodes: [
+        {
+          body: "still old, second page",
+          url: "https://github.com/owner/repo/issues/2#issuecomment-2",
+          createdAt: "2023-08-01T00:00:00Z",
+          author: { login: "testuser" },
+        },
+      ],
+    });
+    commentPagesByCursor.set("CURSOR_PAGE_3", {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        {
+          body: "recent comment on the last page",
+          url: "https://github.com/owner/repo/issues/2#issuecomment-3",
+          createdAt: "2024-01-10T00:00:00Z",
+          author: { login: "testuser" },
+        },
+      ],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const issueComments = events.filter((event) => event.type === "IssueComment");
+    expect(issueComments).toEqual([
+      {
+        type: "IssueComment",
+        createdAt: "2024-01-10T00:00:00Z",
+        issueTitle: "Busy issue",
+        issueUrl: "https://github.com/owner/repo/issues/2",
+        body: "recent comment on the last page",
+        url: "https://github.com/owner/repo/issues/2#issuecomment-3",
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+
+    // The follow-up pages must be requested via the node query with the
+    // surfaced item's id and the previous page's end cursor.
+    const pageCalls = calls.filter((call) => call.query.includes("node(id:"));
+    expect(pageCalls.map((call) => call.variables)).toEqual([
+      { nodeId: "ISSUE_NODE_ID", first: 100, after: "CURSOR_PAGE_2" },
+      { nodeId: "ISSUE_NODE_ID", first: 100, after: "CURSOR_PAGE_3" },
     ]);
   });
 });

@@ -39,6 +39,7 @@ export const ISSUE_COMMENT_SEARCH_QUERY = `
       }
       nodes {
         ... on Issue {
+          id
           title
           url
           createdAt
@@ -98,6 +99,7 @@ export const DISCUSSION_COMMENT_SEARCH_QUERY = `
       }
       nodes {
         ... on Discussion {
+          id
           title
           url
           createdAt
@@ -157,6 +159,7 @@ export const PULL_REQUEST_COMMENT_SEARCH_QUERY = `
       }
       nodes {
         ... on PullRequest {
+          id
           title
           url
           createdAt
@@ -182,6 +185,34 @@ export const PULL_REQUEST_COMMENT_SEARCH_QUERY = `
     }
   }
 `;
+
+// Fetches the next pages of a comment connection for a single issue,
+// discussion, or pull request surfaced by a comment search whose first 100
+// comments did not cover the whole thread.
+const buildCommentsPageQuery = (typename: "Issue" | "Discussion" | "PullRequest"): string => `
+  query ($nodeId: ID!, $first: Int!, $after: String!) {
+    node(id: $nodeId) {
+      ... on ${typename} {
+        comments(first: $first, after: $after) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {
+            body
+            url
+            createdAt
+            author { login }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const ISSUE_COMMENTS_PAGE_QUERY = buildCommentsPageQuery("Issue");
+export const DISCUSSION_COMMENTS_PAGE_QUERY = buildCommentsPageQuery("Discussion");
+export const PULL_REQUEST_COMMENTS_PAGE_QUERY = buildCommentsPageQuery("PullRequest");
 
 export const CONTRIBUTIONS_COLLECTION_QUERY = `
   query ($login: String!, $from: DateTime!, $to: DateTime!) {
