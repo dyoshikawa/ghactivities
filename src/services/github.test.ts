@@ -6,20 +6,30 @@ import { GitHubService } from "./github.js";
 // can assert none of them uses a reserved variable key, and exposes a mutable
 // node list served to the issue-comment search. Declared via vi.hoisted so
 // both are available inside the (hoisted) vi.mock factory below.
-const { calls, issueCommentSearchNodes, commentPagesByCursor, searchResponsesByQuery } = vi.hoisted(
-  () => ({
+const { calls, issueCommentSearchNodes, commentPagesByCursor, searchResponsesByQuery, failures } =
+  vi.hoisted(() => ({
     calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
     issueCommentSearchNodes: [] as unknown[],
     commentPagesByCursor: new Map<string, unknown>(),
     searchResponsesByQuery: new Map<string, unknown>(),
-  }),
-);
+    // Failure injection: while a substring's error list is non-empty, calls
+    // whose query or searchQuery contains the substring reject with the next
+    // error from the list.
+    failures: new Map<string, unknown[]>(),
+  }));
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
 // each query the service issues, and records the (query, variables) pairs.
 vi.mock("@octokit/graphql", () => {
   const impl = (query: string, variables: Record<string, unknown> = {}) => {
     calls.push({ query, variables });
+
+    const failureKey = `${query} ${String(variables.searchQuery ?? "")}`;
+    for (const [substring, errors] of failures) {
+      if (errors.length > 0 && failureKey.includes(substring)) {
+        return Promise.reject(errors.shift());
+      }
+    }
 
     if (query.includes("contributionsCollection")) {
       return Promise.resolve({
@@ -66,6 +76,7 @@ beforeEach(() => {
   issueCommentSearchNodes.length = 0;
   commentPagesByCursor.clear();
   searchResponsesByQuery.clear();
+  failures.clear();
 });
 
 const makeService = (params?: {
@@ -73,6 +84,7 @@ const makeService = (params?: {
   until?: Date;
   visibility?: "public" | "private" | "all";
   onWarning?: (message: string) => void;
+  retry?: { maxAttempts?: number; baseDelayMs?: number };
 }) =>
   new GitHubService({
     token: "test-token",
@@ -80,6 +92,7 @@ const makeService = (params?: {
     until: params?.until ?? new Date("2024-01-15T00:00:00Z"),
     visibility: params?.visibility ?? "public",
     ...(params?.onWarning ? { onWarning: params.onWarning } : {}),
+    retry: params?.retry ?? { baseDelayMs: 1 },
   });
 
 describe("search date qualifiers", () => {
@@ -360,6 +373,60 @@ describe("repository visibility filtering", () => {
       "PRIVATE issue",
       "INTERNAL issue",
     ]);
+  });
+});
+
+const rateLimitedError = () =>
+  Object.assign(new Error("API rate limit exceeded"), {
+    errors: [{ type: "RATE_LIMITED" }],
+  });
+
+describe("transient failure handling", () => {
+  const issueSearchKey = "author:testuser is:issue";
+
+  it("retries transient errors and succeeds", async () => {
+    const warnings: string[] = [];
+    failures.set(issueSearchKey, [Object.assign(new Error("Bad gateway"), { status: 502 })]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+      issueCount: 1,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("recovered")],
+    });
+
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["recovered"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("retrying");
+    expect(warnings[0]).toContain("Bad gateway");
+  });
+
+  it("gives up after the retry budget and names the failing fetcher", async () => {
+    const warnings: string[] = [];
+    failures.set(issueSearchKey, [
+      rateLimitedError(),
+      rateLimitedError(),
+      rateLimitedError(),
+      rateLimitedError(),
+    ]);
+
+    await expect(
+      makeService({ onWarning: (message) => warnings.push(message) }).fetchAllEvents(),
+    ).rejects.toThrow(/Failed to fetch issues: .*rate limit/);
+    expect(warnings).toHaveLength(3);
+  });
+
+  it("does not retry non-retryable errors", async () => {
+    const warnings: string[] = [];
+    failures.set(issueSearchKey, [Object.assign(new Error("Bad credentials"), { status: 401 })]);
+
+    await expect(
+      makeService({ onWarning: (message) => warnings.push(message) }).fetchAllEvents(),
+    ).rejects.toThrow("Failed to fetch issues: Bad credentials");
+    expect(warnings).toEqual([]);
   });
 });
 

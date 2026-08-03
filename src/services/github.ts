@@ -26,6 +26,7 @@ import {
   splitDateRangeIntoYearPeriods,
   toUtcDayString,
 } from "../utils/date-range.js";
+import { formatError } from "../utils/error.js";
 import {
   COMMIT_HISTORY_QUERY,
   CONTRIBUTIONS_COLLECTION_QUERY,
@@ -48,10 +49,45 @@ interface GitHubServiceParams {
   until: Date;
   visibility: Visibility;
   onWarning?: (message: string) => void;
+  retry?: {
+    maxAttempts?: number;
+    baseDelayMs?: number;
+  };
 }
 
 // GitHub's Search API never returns more than 1,000 results per query.
 const SEARCH_RESULT_CAP = 1000;
+
+// Retry policy for transient GitHub API failures.
+const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 60_000;
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
+
+// The relevant fields of errors thrown by @octokit/graphql: RequestError
+// exposes `status` and `response.headers`; GraphqlResponseError exposes the
+// GraphQL `errors` array (rate limiting surfaces as type RATE_LIMITED).
+interface GitHubApiErrorShape {
+  status?: number;
+  message?: string;
+  response?: { headers?: Record<string, string | number | undefined> };
+  errors?: { type?: string }[];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isRetryableError(error: unknown): boolean {
+  const err = error as GitHubApiErrorShape;
+  if (err.errors?.some((graphqlError) => graphqlError.type === "RATE_LIMITED")) return true;
+  if (typeof err.status !== "number") return false;
+  if (RETRYABLE_STATUS_CODES.has(err.status)) return true;
+  // Secondary rate limits surface as 403 with a rate-limit/abuse message.
+  return err.status === 403 && /rate limit|abuse/i.test(err.message ?? "");
+}
 
 export class GitHubService {
   private readonly graphqlWithAuth: typeof graphql;
@@ -59,6 +95,8 @@ export class GitHubService {
   private readonly until: Date;
   private readonly visibility: Visibility;
   private readonly onWarning: (message: string) => void;
+  private readonly retryMaxAttempts: number;
+  private readonly retryBaseDelayMs: number;
 
   constructor(params: GitHubServiceParams) {
     this.graphqlWithAuth = graphql.defaults({
@@ -68,31 +106,77 @@ export class GitHubService {
     this.until = params.until;
     this.visibility = params.visibility;
     this.onWarning = params.onWarning ?? (() => {});
+    this.retryMaxAttempts = params.retry?.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
+    this.retryBaseDelayMs = params.retry?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
   }
 
   async fetchAllEvents(): Promise<GitHubEvent[]> {
     const username = await this.getViewerLogin();
 
-    const results = await Promise.all([
-      this.fetchIssues(username),
-      this.fetchIssueComments(username),
-      this.fetchDiscussions(username),
-      this.fetchDiscussionComments(username),
-      this.fetchPullRequests(username),
-      this.fetchPullRequestComments(username),
-      this.fetchCommits(username),
-    ]);
+    // Fetchers run one at a time: GitHub's secondary rate-limit guidance is to
+    // avoid concurrent requests, and each fetcher already pages sequentially.
+    const fetchers: { label: string; run: () => Promise<GitHubEvent[]> }[] = [
+      { label: "issues", run: () => this.fetchIssues(username) },
+      { label: "issue comments", run: () => this.fetchIssueComments(username) },
+      { label: "discussions", run: () => this.fetchDiscussions(username) },
+      { label: "discussion comments", run: () => this.fetchDiscussionComments(username) },
+      { label: "pull requests", run: () => this.fetchPullRequests(username) },
+      { label: "pull request comments", run: () => this.fetchPullRequestComments(username) },
+      { label: "commits", run: () => this.fetchCommits(username) },
+    ];
 
-    return results.flat();
+    const events: GitHubEvent[] = [];
+    for (const fetcher of fetchers) {
+      try {
+        events.push(...(await fetcher.run()));
+      } catch (error) {
+        throw new Error(`Failed to fetch ${fetcher.label}: ${formatError(error)}`, {
+          cause: error,
+        });
+      }
+    }
+    return events;
+  }
+
+  // Executes a GraphQL request, retrying transient failures (rate limits and
+  // gateway errors) with the server-suggested delay when available, falling
+  // back to exponential backoff.
+  private async execute<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.graphqlWithAuth<T>(query, variables ?? {});
+      } catch (error) {
+        if (attempt >= this.retryMaxAttempts || !isRetryableError(error)) throw error;
+        const delayMs = this.retryDelayMs(error, attempt);
+        this.onWarning(
+          `GitHub API request failed (${formatError(error)}); retrying in ${String(Math.ceil(delayMs / 1000))}s (attempt ${String(attempt + 1)}/${String(this.retryMaxAttempts)}).`,
+        );
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  private retryDelayMs(error: unknown, attempt: number): number {
+    const headers = (error as GitHubApiErrorShape).response?.headers ?? {};
+    const retryAfterSeconds = Number(headers["retry-after"]);
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      return Math.min(retryAfterSeconds * 1000, MAX_RETRY_DELAY_MS);
+    }
+    const resetEpochSeconds = Number(headers["x-ratelimit-reset"]);
+    if (Number.isFinite(resetEpochSeconds) && resetEpochSeconds > 0) {
+      const waitMs = resetEpochSeconds * 1000 - Date.now();
+      if (waitMs > 0) return Math.min(waitMs, MAX_RETRY_DELAY_MS);
+    }
+    return Math.min(this.retryBaseDelayMs * 2 ** attempt, MAX_RETRY_DELAY_MS);
   }
 
   private async getViewerLogin(): Promise<string> {
-    const response = await this.graphqlWithAuth<ViewerResponse>(VIEWER_QUERY);
+    const response = await this.execute<ViewerResponse>(VIEWER_QUERY);
     return response.viewer.login;
   }
 
   private async getViewerId(): Promise<string> {
-    const response = await this.graphqlWithAuth<{
+    const response = await this.execute<{
       viewer: { id: string; login: string };
     }>(VIEWER_ID_QUERY);
     return response.viewer.id;
@@ -147,10 +231,11 @@ export class GitHubService {
       window,
     });
 
-    let response: SearchResponse<TNode> = await this.graphqlWithAuth<SearchResponse<TNode>>(
-      params.query,
-      { searchQuery, first: 100, after: null },
-    );
+    let response: SearchResponse<TNode> = await this.execute<SearchResponse<TNode>>(params.query, {
+      searchQuery,
+      first: 100,
+      after: null,
+    });
 
     const totalCount = response.search.issueCount ?? response.search.discussionCount;
     if (totalCount === undefined) {
@@ -172,7 +257,7 @@ export class GitHubService {
 
     const nodes = [...response.search.nodes];
     while (response.search.pageInfo.hasNextPage && response.search.pageInfo.endCursor) {
-      response = await this.graphqlWithAuth<SearchResponse<TNode>>(params.query, {
+      response = await this.execute<SearchResponse<TNode>>(params.query, {
         searchQuery,
         first: 100,
         after: response.search.pageInfo.endCursor,
@@ -207,7 +292,7 @@ export class GitHubService {
     let { hasNextPage, endCursor } = params.comments.pageInfo;
 
     while (hasNextPage && endCursor) {
-      const response: CommentsPageResponse = await this.graphqlWithAuth<CommentsPageResponse>(
+      const response: CommentsPageResponse = await this.execute<CommentsPageResponse>(
         params.pageQuery,
         { nodeId: params.nodeId, first: 100, after: endCursor },
       );
@@ -429,7 +514,7 @@ export class GitHubService {
     const repoMap = new Map<string, RepositoryVisibility>();
 
     for (const period of periods) {
-      const response = await this.graphqlWithAuth<ContributionsCollectionResponse>(
+      const response = await this.execute<ContributionsCollectionResponse>(
         CONTRIBUTIONS_COLLECTION_QUERY,
         {
           login: username,
@@ -452,7 +537,7 @@ export class GitHubService {
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const response: CommitHistoryResponse = await this.graphqlWithAuth<CommitHistoryResponse>(
+        const response: CommitHistoryResponse = await this.execute<CommitHistoryResponse>(
           COMMIT_HISTORY_QUERY,
           {
             owner,
