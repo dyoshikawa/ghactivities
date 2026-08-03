@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GitHubService } from "./github.js";
 
 // Records every call the GitHubService makes to @octokit/graphql so the test
-// can assert none of them uses a reserved variable key. Declared via
-// vi.hoisted so it is available inside the (hoisted) vi.mock factory below.
-const { calls } = vi.hoisted(() => ({
+// can assert none of them uses a reserved variable key, and exposes a mutable
+// node list served to the issue-comment search. Declared via vi.hoisted so
+// both are available inside the (hoisted) vi.mock factory below.
+const { calls, issueCommentSearchNodes } = vi.hoisted(() => ({
   calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
+  issueCommentSearchNodes: [] as unknown[],
 }));
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
@@ -24,8 +26,14 @@ vi.mock("@octokit/graphql", () => {
       return Promise.resolve({ repository: { defaultBranchRef: null } });
     }
     if (query.includes("search(type:")) {
+      const searchQuery = String(variables.searchQuery ?? "");
+      const isIssueCommentSearch =
+        searchQuery.includes("commenter:") && searchQuery.includes("is:issue");
       return Promise.resolve({
-        search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        search: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: isIssueCommentSearch ? issueCommentSearchNodes : [],
+        },
       });
     }
     // The only remaining queries are the two viewer lookups; the id variant is
@@ -39,10 +47,96 @@ vi.mock("@octokit/graphql", () => {
   return { graphql: Object.assign(impl, { defaults: () => impl }) };
 });
 
+beforeEach(() => {
+  calls.length = 0;
+  issueCommentSearchNodes.length = 0;
+});
+
+const makeService = () =>
+  new GitHubService({
+    token: "test-token",
+    since: new Date("2024-01-01T00:00:00Z"),
+    until: new Date("2024-01-15T00:00:00Z"),
+    visibility: "public",
+  });
+
+describe("search date qualifiers", () => {
+  it("bounds author searches by created: and commenter searches by updated:>= only", async () => {
+    await makeService().fetchAllEvents();
+
+    const searchQueries = calls
+      .map((call) => call.variables.searchQuery)
+      .filter((value): value is string => typeof value === "string");
+
+    const authorQueries = searchQueries.filter((q) => q.includes("author:"));
+    const commenterQueries = searchQueries.filter((q) => q.includes("commenter:"));
+    expect(authorQueries.length).toBeGreaterThan(0);
+    expect(commenterQueries.length).toBeGreaterThan(0);
+
+    for (const searchQuery of authorQueries) {
+      expect(searchQuery).toContain("created:2024-01-01..2024-01-15");
+    }
+    // A lower `created:` bound on a commenter search would match the parent
+    // item's creation date and silently drop comments left on older items;
+    // only the upper bound `created:<=until` is safe.
+    for (const searchQuery of commenterQueries) {
+      expect(searchQuery).toContain("updated:>=2024-01-01");
+      expect(searchQuery).toContain("created:<=2024-01-15");
+      expect(searchQuery).not.toContain("created:2024-01-01..2024-01-15");
+      expect(searchQuery).not.toContain("updated:>=2024-01-01..");
+    }
+  });
+
+  it("collects an in-range comment on an issue created before the range", async () => {
+    issueCommentSearchNodes.push({
+      title: "Old issue",
+      url: "https://github.com/owner/repo/issues/1",
+      createdAt: "2023-06-01T00:00:00Z",
+      repository: { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" },
+      comments: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            body: "in-range comment by viewer",
+            url: "https://github.com/owner/repo/issues/1#issuecomment-1",
+            createdAt: "2024-01-05T12:00:00Z",
+            author: { login: "testuser" },
+          },
+          {
+            body: "out-of-range comment by viewer",
+            url: "https://github.com/owner/repo/issues/1#issuecomment-2",
+            createdAt: "2023-12-01T00:00:00Z",
+            author: { login: "testuser" },
+          },
+          {
+            body: "in-range comment by someone else",
+            url: "https://github.com/owner/repo/issues/1#issuecomment-3",
+            createdAt: "2024-01-06T00:00:00Z",
+            author: { login: "someone" },
+          },
+        ],
+      },
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const issueComments = events.filter((event) => event.type === "IssueComment");
+    expect(issueComments).toEqual([
+      {
+        type: "IssueComment",
+        createdAt: "2024-01-05T12:00:00Z",
+        issueTitle: "Old issue",
+        issueUrl: "https://github.com/owner/repo/issues/1",
+        body: "in-range comment by viewer",
+        url: "https://github.com/owner/repo/issues/1#issuecomment-1",
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+  });
+});
+
 describe("GitHubService GraphQL variables", () => {
   it("never passes the reserved 'query' key to @octokit/graphql", async () => {
-    calls.length = 0;
-
     const service = new GitHubService({
       token: "test-token",
       since: new Date("2024-01-01T00:00:00Z"),
