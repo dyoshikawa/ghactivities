@@ -92,6 +92,10 @@ describe("splitDateRangeAtUtcDayBoundary", () => {
     expect(toUtcDayString(first.until)).toBe("2024-01-05");
     expect(toUtcDayString(second.since)).toBe("2024-01-06");
     expect(toUtcDayString(second.until)).toBe("2024-01-06");
+    // Both halves must stay chronologically valid even though range.since sits
+    // mid-day on the middle day itself.
+    expect(first.since.getTime()).toBeLessThanOrEqual(first.until.getTime());
+    expect(second.since.getTime()).toBeLessThanOrEqual(second.until.getTime());
   });
 
   it("keeps the original range endpoints on the outer edges", () => {

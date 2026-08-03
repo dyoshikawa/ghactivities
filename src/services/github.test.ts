@@ -44,6 +44,7 @@ vi.mock("@octokit/graphql", () => {
         searchQuery.includes("commenter:") && searchQuery.includes("is:issue");
       return Promise.resolve({
         search: {
+          issueCount: 0,
           pageInfo: { hasNextPage: false, endCursor: null },
           nodes: isIssueCommentSearch ? issueCommentSearchNodes : [],
         },
@@ -255,6 +256,43 @@ describe("search result cap handling", () => {
 
     const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
     expect(issueTitles).toEqual(["first-half", "second-half"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("keeps splitting when a half still exceeds the cap", async () => {
+    const warnings: string[] = [];
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+      issueCount: 1500,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-08", {
+      issueCount: 1200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-04", {
+      issueCount: 600,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-05..2024-01-08", {
+      issueCount: 600,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 300,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-quarter", "second-quarter", "second-half"]);
     expect(warnings).toEqual([]);
   });
 

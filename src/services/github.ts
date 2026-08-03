@@ -120,9 +120,11 @@ export class GitHubService {
   private initialSearchWindow(dateField: "created" | "updated"): DateRange {
     // The window for commenter searches spans `updated:` dates, which reach
     // the present: an item updated after --until can still hold in-range
-    // comments.
+    // comments. The snapshot is padded by a day so items updated while the
+    // collection run is in flight (e.g. across a UTC midnight) stay inside
+    // the final window.
     if (dateField === "updated") {
-      return { since: this.since, until: new Date() };
+      return { since: this.since, until: new Date(Date.now() + 24 * 60 * 60 * 1000) };
     }
     return { since: this.since, until: this.until };
   }
@@ -149,7 +151,12 @@ export class GitHubService {
       { searchQuery, first: 100, after: null },
     );
 
-    const totalCount = response.search.issueCount ?? response.search.discussionCount ?? 0;
+    const totalCount = response.search.issueCount ?? response.search.discussionCount;
+    if (totalCount === undefined) {
+      // Falling back to 0 here would silently disable cap detection, so a
+      // query that forgets to select its count field must fail loudly.
+      throw new Error(`Search query is missing its total count field: ${params.query}`);
+    }
     if (totalCount > SEARCH_RESULT_CAP) {
       if (spansMultipleUtcDays(window)) {
         const [firstHalf, secondHalf] = splitDateRangeAtUtcDayBoundary(window);

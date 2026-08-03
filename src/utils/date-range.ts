@@ -31,8 +31,11 @@ export function splitDateRangeAtUtcDayBoundary(range: DateRange): [DateRange, Da
   const dayCount = Math.round((untilDay - sinceDay) / DAY_MS);
   const midDay = sinceDay + Math.floor(dayCount / 2) * DAY_MS;
 
+  // The first half ends at the last instant of the middle day (same UTC day
+  // string) so the returned ranges stay chronologically valid even when
+  // range.since has a non-midnight time on the middle day itself.
   return [
-    { since: range.since, until: new Date(midDay) },
+    { since: range.since, until: new Date(midDay + DAY_MS - 1) },
     { since: new Date(midDay + DAY_MS), until: range.until },
   ];
 }
