@@ -8,10 +8,17 @@ import type { ScanConfig } from "../types/scan.js";
 
 import { countTokens } from "../utils/count-tokens.js";
 
-// Upper bound on the scan input, counted with cl100k_base. Provider context
-// windows vary, but sending more than this is almost certain to fail or be
-// truncated; failing fast beats a raw provider error after a full upload.
-export const MAX_SCAN_INPUT_TOKENS = 200_000;
+// Conservative per-provider upper bounds on the scan input, counted with
+// cl100k_base. These sit safely inside each provider's default-model context
+// window (Gemini models take ~1M tokens; the others considerably less), so
+// oversized input fails fast with an actionable message instead of a raw
+// provider error after a full upload attempt.
+export const MAX_SCAN_INPUT_TOKENS: Record<ScanConfig["provider"], number> = {
+  openai: 200_000,
+  google: 800_000,
+  vertexai: 800_000,
+  openrouter: 200_000,
+};
 
 const SYSTEM_PROMPT = `You are an assistant that reviews a developer's GitHub activity.
 The user provides a JSON export of their activity (issues, issue comments, discussions,
@@ -59,11 +66,12 @@ export async function scanActivities(params: {
 }): Promise<string> {
   const { config, content } = params;
 
+  const maxInputTokens = MAX_SCAN_INPUT_TOKENS[config.provider];
   const inputTokens = countTokens(content);
-  if (inputTokens > MAX_SCAN_INPUT_TOKENS) {
+  if (inputTokens > maxInputTokens) {
     throw new Error(
-      `Scan input is ~${String(inputTokens)} tokens, which exceeds the ${String(MAX_SCAN_INPUT_TOKENS)}-token limit. ` +
-        `Narrow the collection range (--since/--until) or scan fewer files at a time.`,
+      `Scan input is ~${String(inputTokens)} tokens, which exceeds the ${String(maxInputTokens)}-token limit for provider ${config.provider}. ` +
+        `Narrow the collection range (--since/--until) to reduce the input.`,
     );
   }
 

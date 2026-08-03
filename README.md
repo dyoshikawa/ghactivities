@@ -120,7 +120,7 @@ npx ghactivities scan ./out --provider google --output ./report.md
 
 You pass either a **file** or a **directory**. When a directory is given, every `*.json` file inside it is read and scanned together, in numeric-aware filename order (so `ghactivities_2.json` is read before `ghactivities_10.json`). By default the report is printed to stdout; pass `--output` to write it to a file instead.
 
-The combined scan input is limited to **200,000 tokens** (counted with `js-tiktoken`'s `cl100k_base` encoding). Larger input fails fast with an error before anything is sent to the provider — narrow `--since`/`--until` or scan fewer files at a time.
+The combined scan input is limited per provider — **200,000 tokens** for `openai` and `openrouter`, **800,000 tokens** for `google` and `vertexai` (counted with `js-tiktoken`'s `cl100k_base` encoding). Larger input fails fast with an error before anything is sent to the provider — narrow `--since`/`--until` to reduce the input.
 
 ### One-stop collect and scan
 

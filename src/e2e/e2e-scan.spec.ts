@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import { runCli, useTestDirectory } from "./e2e-helper.js";
@@ -37,6 +38,16 @@ describe("E2E: scan subcommand", () => {
         stdout: expect.stringMatching(/does-not-exist|ENOENT|no such file/i),
       },
     );
+  });
+
+  it("rejects an input larger than the provider's token limit before any API call", async () => {
+    // " token" encodes to one cl100k token; 210k of them exceed openai's
+    // 200k-token scan input limit.
+    await writeFile("./huge.json", JSON.stringify([" token".repeat(210_000)]), "utf-8");
+
+    await expect(runCli(["scan", "./huge.json", "--api-key", "k"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/exceeds the 200000-token limit/),
+    });
   });
 
   it("rejects --scan on the collect command with an invalid provider", async () => {
