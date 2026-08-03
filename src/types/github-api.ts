@@ -1,3 +1,7 @@
+// Mirrors GitHub's GraphQL RepositoryVisibility enum. INTERNAL is used by
+// organization-internal repositories on GitHub Enterprise.
+export type RepositoryVisibility = "PUBLIC" | "PRIVATE" | "INTERNAL";
+
 export interface PageInfo {
   hasNextPage: boolean;
   endCursor: string | null;
@@ -17,7 +21,7 @@ export interface SearchResponse<TNode> {
 export interface RepositoryNode {
   owner: { login: string };
   name: string;
-  visibility: "PUBLIC" | "PRIVATE";
+  visibility: RepositoryVisibility;
 }
 
 export interface IssueNode {
@@ -104,7 +108,7 @@ export interface CommitContributionNode {
   repository: {
     owner: { login: string };
     name: string;
-    visibility: "PUBLIC" | "PRIVATE";
+    visibility: RepositoryVisibility;
   };
   commitCount: number;
 }
@@ -116,7 +120,7 @@ export interface ContributionsCollectionResponse {
         repository: {
           owner: { login: string };
           name: string;
-          visibility: "PUBLIC" | "PRIVATE";
+          visibility: RepositoryVisibility;
         };
         contributions: {
           pageInfo: PageInfo;
