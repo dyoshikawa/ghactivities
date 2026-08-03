@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GitHubService } from "./github.js";
 
@@ -47,6 +47,11 @@ vi.mock("@octokit/graphql", () => {
   return { graphql: Object.assign(impl, { defaults: () => impl }) };
 });
 
+beforeEach(() => {
+  calls.length = 0;
+  issueCommentSearchNodes.length = 0;
+});
+
 const makeService = () =>
   new GitHubService({
     token: "test-token",
@@ -57,9 +62,6 @@ const makeService = () =>
 
 describe("search date qualifiers", () => {
   it("bounds author searches by created: and commenter searches by updated:>= only", async () => {
-    calls.length = 0;
-    issueCommentSearchNodes.length = 0;
-
     await makeService().fetchAllEvents();
 
     const searchQueries = calls
@@ -74,18 +76,18 @@ describe("search date qualifiers", () => {
     for (const searchQuery of authorQueries) {
       expect(searchQuery).toContain("created:2024-01-01..2024-01-15");
     }
-    // A `created:` bound on a commenter search would match the parent item's
-    // creation date and silently drop comments left on older items.
+    // A lower `created:` bound on a commenter search would match the parent
+    // item's creation date and silently drop comments left on older items;
+    // only the upper bound `created:<=until` is safe.
     for (const searchQuery of commenterQueries) {
       expect(searchQuery).toContain("updated:>=2024-01-01");
-      expect(searchQuery).not.toContain("created:");
+      expect(searchQuery).toContain("created:<=2024-01-15");
+      expect(searchQuery).not.toContain("created:2024-01-01..2024-01-15");
       expect(searchQuery).not.toContain("updated:>=2024-01-01..");
     }
   });
 
   it("collects an in-range comment on an issue created before the range", async () => {
-    calls.length = 0;
-    issueCommentSearchNodes.length = 0;
     issueCommentSearchNodes.push({
       title: "Old issue",
       url: "https://github.com/owner/repo/issues/1",
@@ -135,9 +137,6 @@ describe("search date qualifiers", () => {
 
 describe("GitHubService GraphQL variables", () => {
   it("never passes the reserved 'query' key to @octokit/graphql", async () => {
-    calls.length = 0;
-    issueCommentSearchNodes.length = 0;
-
     const service = new GitHubService({
       token: "test-token",
       since: new Date("2024-01-01T00:00:00Z"),

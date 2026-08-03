@@ -86,12 +86,15 @@ export class GitHubService {
     const untilStr = this.until.toISOString().split("T")[0]!;
     // Search qualifiers match the parent issue/PR/discussion, not its comments.
     // Commenter searches therefore filter on `updated:` (a comment always bumps
-    // the parent's updated date); bounding them by `created:` would drop
-    // comments left on items created before the range. The exact per-comment
-    // range check happens later via isWithinDateRange. No upper bound: an item
-    // can be updated again after the range and still hold in-range comments.
+    // the parent's updated date); bounding them by a `created:` range would
+    // drop comments left on items created before the range. The exact
+    // per-comment range check happens later via isWithinDateRange. No upper
+    // bound on `updated:` — an item can be updated again after the range and
+    // still hold in-range comments — but `created:<=until` is safe (an item
+    // must already exist to receive an in-range comment) and trims the result
+    // set away from GitHub search's 1,000-result cap.
     if (params.dateField === "updated") {
-      return `${params.qualifiers} updated:>=${sinceStr}`;
+      return `${params.qualifiers} created:<=${untilStr} updated:>=${sinceStr}`;
     }
     return `${params.qualifiers} created:${sinceStr}..${untilStr}`;
   }
