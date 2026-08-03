@@ -11,7 +11,7 @@ sudo mkdir -p /workspace-worktrees
 sudo chown -R node:node /workspace-worktrees 2>/dev/null || true
 
 # Configure pnpm store directory for devcontainer
-pnpm config set store-dir /home/node/.pnpm-store
+mise exec -- pnpm config set store-dir /home/node/.pnpm-store
 
 # Install project dependencies
 mise exec -c "pnpm i"

@@ -218,6 +218,7 @@
     "trivyignores",
     "aquasecurity",
     "misconfig",
-    "worktree"
+    "worktree",
+    "worktrees"
   ]
 }
