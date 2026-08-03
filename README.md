@@ -1,6 +1,6 @@
 # ghactivities
 
-A CLI tool that collects your GitHub activity — issues, issue comments, discussions, discussion comments, pull requests, pull request comments, and commits — and writes them to a JSON file.
+A CLI tool that collects your GitHub activity — issues, issue comments, discussions, discussion comments, pull requests, pull request comments, pull request review comments, and commits — and writes them to a JSON file.
 
 ## Features
 
@@ -11,7 +11,8 @@ Fetches the following events authored by you within a date range and outputs the
 - **Discussion** — discussions you created
 - **DiscussionComment** — comments you left on discussions
 - **PullRequest** — pull requests you opened
-- **PullRequestComment** — comments you left on pull requests
+- **PullRequestComment** — conversation comments you left on pull requests
+- **PullRequestReviewComment** — review feedback you left on pull requests (review summary bodies and inline review comments on the diff)
 - **Commit** — commits you authored (on each repository's default branch)
 
 It can also **scan** the collected JSON with an LLM to produce a Markdown summary report — see [Scanning activity with an LLM](#scanning-activity-with-an-llm).

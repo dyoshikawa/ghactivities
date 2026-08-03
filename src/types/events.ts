@@ -7,6 +7,7 @@ export type GitHubEvent =
   | DiscussionCommentEvent
   | PullRequestEvent
   | PullRequestCommentEvent
+  | PullRequestReviewCommentEvent
   | CommitEvent;
 
 interface BaseEvent {
@@ -58,6 +59,14 @@ export interface PullRequestEvent extends BaseEvent {
 
 export interface PullRequestCommentEvent extends BaseEvent {
   type: "PullRequestComment";
+  prTitle: string;
+  prUrl: string;
+  body: string;
+  url: string;
+}
+
+export interface PullRequestReviewCommentEvent extends BaseEvent {
+  type: "PullRequestReviewComment";
   prTitle: string;
   prUrl: string;
   body: string;

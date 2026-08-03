@@ -6,30 +6,72 @@ import { computeRetryDelayMs, GitHubService } from "./github.js";
 // can assert none of them uses a reserved variable key, and exposes a mutable
 // node list served to the issue-comment search. Declared via vi.hoisted so
 // both are available inside the (hoisted) vi.mock factory below.
-const { calls, issueCommentSearchNodes, commentPagesByCursor, searchResponsesByQuery, failures } =
-  vi.hoisted(() => ({
-    calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
-    issueCommentSearchNodes: [] as unknown[],
-    commentPagesByCursor: new Map<string, unknown>(),
-    searchResponsesByQuery: new Map<string, unknown>(),
-    // Failure injection: while a substring's error list is non-empty, calls
-    // whose query or searchQuery contains the substring reject with the next
-    // error from the list.
-    failures: new Map<string, unknown[]>(),
-  }));
+const {
+  calls,
+  issueCommentSearchNodes,
+  reviewSearchNodes,
+  commentPagesByCursor,
+  reviewPagesByCursor,
+  searchResponsesByQuery,
+  failures,
+} = vi.hoisted(() => ({
+  calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
+  issueCommentSearchNodes: [] as unknown[],
+  reviewSearchNodes: [] as unknown[],
+  commentPagesByCursor: new Map<string, unknown>(),
+  reviewPagesByCursor: new Map<string, unknown>(),
+  searchResponsesByQuery: new Map<string, unknown>(),
+  // Failure injection: while a substring's error list is non-empty, calls
+  // whose query or searchQuery contains the substring reject with the next
+  // error from the list.
+  failures: new Map<string, unknown[]>(),
+}));
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
 // each query the service issues, and records the (query, variables) pairs.
 vi.mock("@octokit/graphql", () => {
-  const impl = (query: string, variables: Record<string, unknown> = {}) => {
-    calls.push({ query, variables });
-
+  const findInjectedFailure = (query: string, variables: Record<string, unknown>) => {
     const failureKey = `${query} ${String(variables.searchQuery ?? "")}`;
     for (const [substring, errors] of failures) {
       if (errors.length > 0 && failureKey.includes(substring)) {
-        return Promise.reject(errors.shift());
+        return errors.shift();
       }
     }
+    return undefined;
+  };
+
+  // Nested pagination: serves the review or comment page registered for the
+  // requested cursor.
+  const handleNodePage = (query: string, variables: Record<string, unknown>) => {
+    if (query.includes("reviews(first:")) {
+      const page = reviewPagesByCursor.get(String(variables.after ?? ""));
+      return { node: page ? { reviews: page } : null };
+    }
+    const page = commentPagesByCursor.get(String(variables.after ?? ""));
+    return { node: page ? { comments: page } : null };
+  };
+
+  const handleSearch = (variables: Record<string, unknown>) => {
+    const searchQuery = String(variables.searchQuery ?? "");
+    const preset = searchResponsesByQuery.get(searchQuery);
+    if (preset) return { search: preset };
+    let nodes: unknown[] = [];
+    if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
+      nodes = issueCommentSearchNodes;
+    }
+    if (searchQuery.includes("reviewed-by:")) {
+      nodes = reviewSearchNodes;
+    }
+    return {
+      search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+    };
+  };
+
+  const impl = (query: string, variables: Record<string, unknown> = {}) => {
+    calls.push({ query, variables });
+
+    const failure = findInjectedFailure(query, variables);
+    if (failure !== undefined) return Promise.reject(failure);
 
     if (query.includes("contributionsCollection")) {
       return Promise.resolve({
@@ -39,26 +81,12 @@ vi.mock("@octokit/graphql", () => {
     if (query.includes("defaultBranchRef")) {
       return Promise.resolve({ repository: { defaultBranchRef: null } });
     }
-    // Nested comment pagination: serves the comment page registered for the
-    // requested cursor. Must be checked before the viewer-id fallback because
-    // this query text also contains "id".
+    // Must come before the viewer-id fallback: these query texts contain "id".
     if (query.includes("node(id:")) {
-      const page = commentPagesByCursor.get(String(variables.after ?? ""));
-      return Promise.resolve({ node: page ? { comments: page } : null });
+      return Promise.resolve(handleNodePage(query, variables));
     }
     if (query.includes("search(type:")) {
-      const searchQuery = String(variables.searchQuery ?? "");
-      const preset = searchResponsesByQuery.get(searchQuery);
-      if (preset) return Promise.resolve({ search: preset });
-      const isIssueCommentSearch =
-        searchQuery.includes("commenter:") && searchQuery.includes("is:issue");
-      return Promise.resolve({
-        search: {
-          issueCount: 0,
-          pageInfo: { hasNextPage: false, endCursor: null },
-          nodes: isIssueCommentSearch ? issueCommentSearchNodes : [],
-        },
-      });
+      return Promise.resolve(handleSearch(variables));
     }
     // The only remaining queries are the two viewer lookups; the id variant is
     // the one that also selects the `id` field.
@@ -74,7 +102,9 @@ vi.mock("@octokit/graphql", () => {
 beforeEach(() => {
   calls.length = 0;
   issueCommentSearchNodes.length = 0;
+  reviewSearchNodes.length = 0;
   commentPagesByCursor.clear();
+  reviewPagesByCursor.clear();
   searchResponsesByQuery.clear();
   failures.clear();
 });
@@ -372,6 +402,126 @@ describe("repository visibility filtering", () => {
       "PUBLIC issue",
       "PRIVATE issue",
       "INTERNAL issue",
+    ]);
+  });
+});
+
+const reviewedPrNode = (reviews: unknown) => ({
+  id: "PR_NODE_ID",
+  title: "Reviewed PR",
+  url: "https://github.com/owner/repo/pull/7",
+  createdAt: "2023-06-01T00:00:00Z",
+  repository: { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" },
+  reviews,
+});
+
+describe("pull request review comments", () => {
+  it("collects in-range review bodies and inline comments authored by the viewer", async () => {
+    reviewSearchNodes.push(
+      reviewedPrNode({
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            id: "REVIEW_1",
+            body: "review summary in range",
+            url: "https://github.com/owner/repo/pull/7#pullrequestreview-1",
+            createdAt: "2024-01-05T00:00:00Z",
+            author: { login: "testuser" },
+            comments: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                {
+                  body: "inline comment in range",
+                  url: "https://github.com/owner/repo/pull/7#discussion_r1",
+                  createdAt: "2024-01-05T01:00:00Z",
+                  author: { login: "testuser" },
+                },
+                {
+                  body: "inline comment out of range",
+                  url: "https://github.com/owner/repo/pull/7#discussion_r2",
+                  createdAt: "2023-11-01T00:00:00Z",
+                  author: { login: "testuser" },
+                },
+              ],
+            },
+          },
+          {
+            id: "REVIEW_2",
+            // Empty body (e.g. a plain approval) must not produce an event.
+            body: "",
+            url: "https://github.com/owner/repo/pull/7#pullrequestreview-2",
+            createdAt: "2024-01-06T00:00:00Z",
+            author: { login: "testuser" },
+            comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          },
+          {
+            id: "REVIEW_3",
+            body: "someone else's review in range",
+            url: "https://github.com/owner/repo/pull/7#pullrequestreview-3",
+            createdAt: "2024-01-07T00:00:00Z",
+            author: { login: "someone" },
+            comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          },
+        ],
+      }),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    const reviewComments = events.filter((event) => event.type === "PullRequestReviewComment");
+    expect(reviewComments).toEqual([
+      {
+        type: "PullRequestReviewComment",
+        createdAt: "2024-01-05T00:00:00Z",
+        prTitle: "Reviewed PR",
+        prUrl: "https://github.com/owner/repo/pull/7",
+        body: "review summary in range",
+        url: "https://github.com/owner/repo/pull/7#pullrequestreview-1",
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+      {
+        type: "PullRequestReviewComment",
+        createdAt: "2024-01-05T01:00:00Z",
+        prTitle: "Reviewed PR",
+        prUrl: "https://github.com/owner/repo/pull/7",
+        body: "inline comment in range",
+        url: "https://github.com/owner/repo/pull/7#discussion_r1",
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+  });
+
+  it("paginates the reviews connection", async () => {
+    reviewSearchNodes.push(
+      reviewedPrNode({
+        pageInfo: { hasNextPage: true, endCursor: "REVIEW_CURSOR_2" },
+        nodes: [],
+      }),
+    );
+    reviewPagesByCursor.set("REVIEW_CURSOR_2", {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        {
+          id: "REVIEW_PAGE_2",
+          body: "review on the second page",
+          url: "https://github.com/owner/repo/pull/7#pullrequestreview-9",
+          createdAt: "2024-01-08T00:00:00Z",
+          author: { login: "testuser" },
+          comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        },
+      ],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const reviewComments = events.filter((event) => event.type === "PullRequestReviewComment");
+    expect(reviewComments.map((e) => e.body)).toEqual(["review on the second page"]);
+
+    const reviewPageCalls = calls.filter(
+      (call) => call.query.includes("node(id:") && call.query.includes("reviews(first:"),
+    );
+    expect(reviewPageCalls.map((call) => call.variables)).toEqual([
+      { nodeId: "PR_NODE_ID", first: 25, after: "REVIEW_CURSOR_2" },
     ]);
   });
 });
