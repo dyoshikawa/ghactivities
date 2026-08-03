@@ -3,6 +3,9 @@ import { graphql } from "@octokit/graphql";
 import type { Visibility } from "../types/cli.js";
 import type { GitHubEvent } from "../types/events.js";
 import type {
+  CommentNode,
+  CommentsConnection,
+  CommentsPageResponse,
   CommitHistoryResponse,
   ContributionsCollectionResponse,
   DiscussionCommentSearchResponse,
@@ -19,10 +22,13 @@ import {
   COMMIT_HISTORY_QUERY,
   CONTRIBUTIONS_COLLECTION_QUERY,
   DISCUSSION_COMMENT_SEARCH_QUERY,
+  DISCUSSION_COMMENTS_PAGE_QUERY,
   DISCUSSION_SEARCH_QUERY,
   ISSUE_COMMENT_SEARCH_QUERY,
+  ISSUE_COMMENTS_PAGE_QUERY,
   ISSUE_SEARCH_QUERY,
   PULL_REQUEST_COMMENT_SEARCH_QUERY,
+  PULL_REQUEST_COMMENTS_PAGE_QUERY,
   PULL_REQUEST_SEARCH_QUERY,
   VIEWER_ID_QUERY,
   VIEWER_QUERY,
@@ -110,6 +116,31 @@ export class GitHubService {
     return date >= this.since && date <= this.until;
   }
 
+  // The comment searches embed only the first 100 comments per item. Comments
+  // are returned oldest-first, so on long threads the recent (likely in-range)
+  // comments live in the tail pages, which must be fetched via the node query.
+  private async fetchAllComments(params: {
+    nodeId: string;
+    comments: CommentsConnection;
+    pageQuery: string;
+  }): Promise<CommentNode[]> {
+    const comments = [...params.comments.nodes];
+    let { hasNextPage, endCursor } = params.comments.pageInfo;
+
+    while (hasNextPage && endCursor) {
+      const response: CommentsPageResponse = await this.graphqlWithAuth<CommentsPageResponse>(
+        params.pageQuery,
+        { nodeId: params.nodeId, first: 100, after: endCursor },
+      );
+      const page = response.node?.comments;
+      if (!page) break;
+      comments.push(...page.nodes);
+      ({ hasNextPage, endCursor } = page.pageInfo);
+    }
+
+    return comments;
+  }
+
   private async fetchIssues(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
     let cursor: string | null = null;
@@ -170,7 +201,12 @@ export class GitHubService {
       for (const node of response.search.nodes) {
         if (!this.matchesVisibility(node.repository.visibility)) continue;
 
-        for (const comment of node.comments.nodes) {
+        const comments = await this.fetchAllComments({
+          nodeId: node.id,
+          comments: node.comments,
+          pageQuery: ISSUE_COMMENTS_PAGE_QUERY,
+        });
+        for (const comment of comments) {
           if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
             events.push({
               type: "IssueComment",
@@ -257,7 +293,12 @@ export class GitHubService {
       for (const node of response.search.nodes) {
         if (!this.matchesVisibility(node.repository.visibility)) continue;
 
-        for (const comment of node.comments.nodes) {
+        const comments = await this.fetchAllComments({
+          nodeId: node.id,
+          comments: node.comments,
+          pageQuery: DISCUSSION_COMMENTS_PAGE_QUERY,
+        });
+        for (const comment of comments) {
           if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
             events.push({
               type: "DiscussionComment",
@@ -344,7 +385,12 @@ export class GitHubService {
       for (const node of response.search.nodes) {
         if (!this.matchesVisibility(node.repository.visibility)) continue;
 
-        for (const comment of node.comments.nodes) {
+        const comments = await this.fetchAllComments({
+          nodeId: node.id,
+          comments: node.comments,
+          pageQuery: PULL_REQUEST_COMMENTS_PAGE_QUERY,
+        });
+        for (const comment of comments) {
           if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
             events.push({
               type: "PullRequestComment",

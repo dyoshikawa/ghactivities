@@ -31,15 +31,22 @@ export interface CommentNode {
   author: { login: string } | null;
 }
 
+export interface CommentsConnection {
+  pageInfo: PageInfo;
+  nodes: CommentNode[];
+}
+
+export interface CommentsPageResponse {
+  node: { comments: CommentsConnection } | null;
+}
+
 export interface IssueWithCommentsNode {
+  id: string;
   title: string;
   url: string;
   createdAt: string;
   repository: RepositoryNode;
-  comments: {
-    pageInfo: PageInfo;
-    nodes: CommentNode[];
-  };
+  comments: CommentsConnection;
 }
 
 export interface IssueCommentSearchResponse {
@@ -65,14 +72,12 @@ export interface DiscussionSearchResponse {
 }
 
 export interface DiscussionWithCommentsNode {
+  id: string;
   title: string;
   url: string;
   createdAt: string;
   repository: RepositoryNode;
-  comments: {
-    pageInfo: PageInfo;
-    nodes: CommentNode[];
-  };
+  comments: CommentsConnection;
 }
 
 export interface DiscussionCommentSearchResponse {
@@ -98,14 +103,12 @@ export interface PullRequestSearchResponse {
 }
 
 export interface PullRequestWithCommentsNode {
+  id: string;
   title: string;
   url: string;
   createdAt: string;
   repository: RepositoryNode;
-  comments: {
-    pageInfo: PageInfo;
-    nodes: CommentNode[];
-  };
+  comments: CommentsConnection;
 }
 
 export interface PullRequestCommentSearchResponse {
