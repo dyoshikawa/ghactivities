@@ -14,6 +14,7 @@ import type {
   IssueWithCommentsNode,
   PullRequestNode,
   PullRequestWithCommentsNode,
+  RepositoryVisibility,
   SearchResponse,
   ViewerResponse,
 } from "../types/github-api.js";
@@ -181,10 +182,12 @@ export class GitHubService {
     return nodes;
   }
 
-  private matchesVisibility(visibility: "PUBLIC" | "PRIVATE"): boolean {
+  private matchesVisibility(visibility: RepositoryVisibility): boolean {
     if (this.visibility === "all") return true;
     if (this.visibility === "public") return visibility === "PUBLIC";
-    return visibility === "PRIVATE";
+    // INTERNAL (org-internal on GitHub Enterprise) repositories are not
+    // publicly visible, so they group with private.
+    return visibility === "PRIVATE" || visibility === "INTERNAL";
   }
 
   private isWithinDateRange(dateStr: string): boolean {
@@ -423,7 +426,7 @@ export class GitHubService {
       until: this.until,
     });
 
-    const repoMap = new Map<string, "PUBLIC" | "PRIVATE">();
+    const repoMap = new Map<string, RepositoryVisibility>();
 
     for (const period of periods) {
       const response = await this.graphqlWithAuth<ContributionsCollectionResponse>(

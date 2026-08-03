@@ -1,3 +1,5 @@
+import type { RepositoryVisibility } from "./github-api.js";
+
 export type GitHubEvent =
   | IssueEvent
   | IssueCommentEvent
@@ -13,7 +15,7 @@ interface BaseEvent {
   repository: {
     owner: string;
     name: string;
-    visibility: "PUBLIC" | "PRIVATE";
+    visibility: RepositoryVisibility;
   };
 }
 

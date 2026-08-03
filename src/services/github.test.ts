@@ -71,13 +71,14 @@ beforeEach(() => {
 const makeService = (params?: {
   since?: Date;
   until?: Date;
+  visibility?: "public" | "private" | "all";
   onWarning?: (message: string) => void;
 }) =>
   new GitHubService({
     token: "test-token",
     since: params?.since ?? new Date("2024-01-01T00:00:00Z"),
     until: params?.until ?? new Date("2024-01-15T00:00:00Z"),
-    visibility: "public",
+    visibility: params?.visibility ?? "public",
     ...(params?.onWarning ? { onWarning: params.onWarning } : {}),
   });
 
@@ -315,6 +316,50 @@ describe("search result cap handling", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("1000");
     expect(warnings[0]).toContain("author:testuser is:issue created:2024-01-05..2024-01-05");
+  });
+});
+
+const visibilityNode = (visibility: string) => ({
+  title: `${visibility} issue`,
+  url: `https://github.com/owner/repo/issues/${visibility}`,
+  body: "",
+  createdAt: "2024-01-02T00:00:00Z",
+  repository: { owner: { login: "owner" }, name: "repo", visibility },
+});
+
+describe("repository visibility filtering", () => {
+  const setIssueSearchNodes = (nodes: unknown[]) => {
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+      issueCount: nodes.length,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes,
+    });
+  };
+
+  const collectIssueTitles = async (visibility: "public" | "private" | "all") => {
+    setIssueSearchNodes([
+      visibilityNode("PUBLIC"),
+      visibilityNode("PRIVATE"),
+      visibilityNode("INTERNAL"),
+    ]);
+    const events = await makeService({ visibility }).fetchAllEvents();
+    return events.filter((event) => event.type === "Issue").map((e) => e.title);
+  };
+
+  it("includes only PUBLIC repositories with --visibility public", async () => {
+    expect(await collectIssueTitles("public")).toEqual(["PUBLIC issue"]);
+  });
+
+  it("groups INTERNAL repositories with private", async () => {
+    expect(await collectIssueTitles("private")).toEqual(["PRIVATE issue", "INTERNAL issue"]);
+  });
+
+  it("includes every visibility with --visibility all", async () => {
+    expect(await collectIssueTitles("all")).toEqual([
+      "PUBLIC issue",
+      "PRIVATE issue",
+      "INTERNAL issue",
+    ]);
   });
 });
 
