@@ -78,9 +78,21 @@ export class GitHubService {
     return response.viewer.id;
   }
 
-  private buildSearchQuery(params: { user: string; qualifiers: string }): string {
+  private buildSearchQuery(params: {
+    qualifiers: string;
+    dateField?: "created" | "updated";
+  }): string {
     const sinceStr = this.since.toISOString().split("T")[0]!;
     const untilStr = this.until.toISOString().split("T")[0]!;
+    // Search qualifiers match the parent issue/PR/discussion, not its comments.
+    // Commenter searches therefore filter on `updated:` (a comment always bumps
+    // the parent's updated date); bounding them by `created:` would drop
+    // comments left on items created before the range. The exact per-comment
+    // range check happens later via isWithinDateRange. No upper bound: an item
+    // can be updated again after the range and still hold in-range comments.
+    if (params.dateField === "updated") {
+      return `${params.qualifiers} updated:>=${sinceStr}`;
+    }
     return `${params.qualifiers} created:${sinceStr}..${untilStr}`;
   }
 
@@ -100,7 +112,6 @@ export class GitHubService {
     let cursor: string | null = null;
 
     const searchQuery = this.buildSearchQuery({
-      user: username,
       qualifiers: `author:${username} is:issue`,
     });
 
@@ -140,8 +151,8 @@ export class GitHubService {
     let cursor: string | null = null;
 
     const searchQuery = this.buildSearchQuery({
-      user: username,
       qualifiers: `commenter:${username} is:issue`,
+      dateField: "updated",
     });
 
     // eslint-disable-next-line no-constant-condition
@@ -187,7 +198,6 @@ export class GitHubService {
     let cursor: string | null = null;
 
     const searchQuery = this.buildSearchQuery({
-      user: username,
       qualifiers: `author:${username} type:discussion`,
     });
 
@@ -229,8 +239,8 @@ export class GitHubService {
     let cursor: string | null = null;
 
     const searchQuery = this.buildSearchQuery({
-      user: username,
       qualifiers: `commenter:${username} type:discussion`,
+      dateField: "updated",
     });
 
     // eslint-disable-next-line no-constant-condition
@@ -275,7 +285,6 @@ export class GitHubService {
     let cursor: string | null = null;
 
     const searchQuery = this.buildSearchQuery({
-      user: username,
       qualifiers: `author:${username} is:pr`,
     });
 
@@ -317,8 +326,8 @@ export class GitHubService {
     let cursor: string | null = null;
 
     const searchQuery = this.buildSearchQuery({
-      user: username,
       qualifiers: `commenter:${username} is:pr`,
+      dateField: "updated",
     });
 
     // eslint-disable-next-line no-constant-condition
