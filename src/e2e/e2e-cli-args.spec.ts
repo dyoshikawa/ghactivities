@@ -20,6 +20,14 @@ describe("E2E: CLI option validation", () => {
     });
   });
 
+  it("rejects a --since later than --until", async () => {
+    await expect(
+      runCli(["--since", "2025-06-01T00:00:00Z", "--until", "2025-01-01T00:00:00Z"]),
+    ).rejects.toMatchObject({
+      stdout: expect.stringMatching(/--since must not be after --until/),
+    });
+  });
+
   it("rejects a malformed --max-length-size value", async () => {
     await expect(runCli(["--max-length-size", "abc"])).rejects.toMatchObject({
       stdout: expect.stringMatching(/max-length-size|size/i),

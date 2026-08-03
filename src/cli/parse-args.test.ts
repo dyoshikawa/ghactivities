@@ -90,6 +90,22 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["--since", "not-a-date"])).toThrow();
   });
 
+  it("throws when --since is after --until", () => {
+    expect(() =>
+      parseCliArgs(["--since", "2025-06-01T00:00:00Z", "--until", "2025-01-01T00:00:00Z"]),
+    ).toThrow(/--since must not be after --until/);
+  });
+
+  it("accepts --since equal to --until", () => {
+    const options = parseCliArgs([
+      "--since",
+      "2025-01-01T00:00:00Z",
+      "--until",
+      "2025-01-01T00:00:00Z",
+    ]);
+    expect(options.since.getTime()).toBe(options.until.getTime());
+  });
+
   it("throws on invalid max-length-size", () => {
     expect(() => parseCliArgs(["--max-length-size", "abc"])).toThrow();
   });
