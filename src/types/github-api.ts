@@ -3,6 +3,17 @@ export interface PageInfo {
   endCursor: string | null;
 }
 
+export interface SearchConnection<TNode> {
+  issueCount?: number;
+  discussionCount?: number;
+  pageInfo: PageInfo;
+  nodes: TNode[];
+}
+
+export interface SearchResponse<TNode> {
+  search: SearchConnection<TNode>;
+}
+
 export interface RepositoryNode {
   owner: { login: string };
   name: string;
@@ -17,12 +28,7 @@ export interface IssueNode {
   repository: RepositoryNode;
 }
 
-export interface IssueSearchResponse {
-  search: {
-    pageInfo: PageInfo;
-    nodes: IssueNode[];
-  };
-}
+export type IssueSearchResponse = SearchResponse<IssueNode>;
 
 export interface CommentNode {
   body: string;
@@ -49,12 +55,7 @@ export interface IssueWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export interface IssueCommentSearchResponse {
-  search: {
-    pageInfo: PageInfo;
-    nodes: IssueWithCommentsNode[];
-  };
-}
+export type IssueCommentSearchResponse = SearchResponse<IssueWithCommentsNode>;
 
 export interface DiscussionNode {
   title: string;
@@ -64,12 +65,7 @@ export interface DiscussionNode {
   repository: RepositoryNode;
 }
 
-export interface DiscussionSearchResponse {
-  search: {
-    pageInfo: PageInfo;
-    nodes: DiscussionNode[];
-  };
-}
+export type DiscussionSearchResponse = SearchResponse<DiscussionNode>;
 
 export interface DiscussionWithCommentsNode {
   id: string;
@@ -80,12 +76,7 @@ export interface DiscussionWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export interface DiscussionCommentSearchResponse {
-  search: {
-    pageInfo: PageInfo;
-    nodes: DiscussionWithCommentsNode[];
-  };
-}
+export type DiscussionCommentSearchResponse = SearchResponse<DiscussionWithCommentsNode>;
 
 export interface PullRequestNode {
   title: string;
@@ -95,12 +86,7 @@ export interface PullRequestNode {
   repository: RepositoryNode;
 }
 
-export interface PullRequestSearchResponse {
-  search: {
-    pageInfo: PageInfo;
-    nodes: PullRequestNode[];
-  };
-}
+export type PullRequestSearchResponse = SearchResponse<PullRequestNode>;
 
 export interface PullRequestWithCommentsNode {
   id: string;
@@ -111,12 +97,7 @@ export interface PullRequestWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export interface PullRequestCommentSearchResponse {
-  search: {
-    pageInfo: PageInfo;
-    nodes: PullRequestWithCommentsNode[];
-  };
-}
+export type PullRequestCommentSearchResponse = SearchResponse<PullRequestWithCommentsNode>;
 
 export interface CommitContributionNode {
   occurredAt: string;

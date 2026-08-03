@@ -160,6 +160,7 @@ For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vert
 ## Notes
 
 - **Commits** are collected from each repository's **default branch** only; commits on other branches are not included.
+- GitHub's Search API returns at most 1,000 results per query. When a query would exceed that cap, the date range is automatically split into smaller windows and searched again. If a single UTC day still exceeds the cap, the excess items are skipped and a warning is printed.
 - For issues, pull requests, and discussions, the range is matched at day granularity (the date portion of `--since`/`--until`); comments and commits are matched at full timestamp precision.
 
 ## License
