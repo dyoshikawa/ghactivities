@@ -101,6 +101,35 @@ export interface PullRequestWithCommentsNode {
   comments: CommentsConnection;
 }
 
+export interface ReviewNode {
+  id: string;
+  body: string;
+  url: string;
+  createdAt: string;
+  /** Null while a review is a pending draft; set once it is submitted. */
+  submittedAt: string | null;
+  author: { login: string } | null;
+  comments: CommentsConnection;
+}
+
+export interface ReviewsConnection {
+  pageInfo: PageInfo;
+  nodes: ReviewNode[];
+}
+
+export interface ReviewsPageResponse {
+  node: { reviews: ReviewsConnection } | null;
+}
+
+export interface PullRequestWithReviewsNode {
+  id: string;
+  title: string;
+  url: string;
+  createdAt: string;
+  repository: RepositoryNode;
+  reviews: ReviewsConnection;
+}
+
 export type PullRequestCommentSearchResponse = SearchResponse<PullRequestWithCommentsNode>;
 
 export interface CommitContributionNode {

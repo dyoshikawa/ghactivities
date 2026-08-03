@@ -22,7 +22,8 @@ export const MAX_SCAN_INPUT_TOKENS: Record<ScanConfig["provider"], number> = {
 
 const SYSTEM_PROMPT = `You are an assistant that reviews a developer's GitHub activity.
 The user provides a JSON export of their activity (issues, issue comments, discussions,
-discussion comments, pull requests, pull request comments, and commits).
+discussion comments, pull requests, pull request comments, pull request review comments,
+and commits).
 Analyze it and produce a concise report in Markdown that includes:
 - A short overall summary of what the developer worked on.
 - The main themes or projects, grouped by repository when useful.

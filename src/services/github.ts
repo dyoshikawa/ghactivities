@@ -14,7 +14,11 @@ import type {
   IssueWithCommentsNode,
   PullRequestNode,
   PullRequestWithCommentsNode,
+  PullRequestWithReviewsNode,
   RepositoryVisibility,
+  ReviewNode,
+  ReviewsConnection,
+  ReviewsPageResponse,
   SearchResponse,
   ViewerResponse,
 } from "../types/github-api.js";
@@ -38,7 +42,10 @@ import {
   ISSUE_SEARCH_QUERY,
   PULL_REQUEST_COMMENT_SEARCH_QUERY,
   PULL_REQUEST_COMMENTS_PAGE_QUERY,
+  PULL_REQUEST_REVIEW_SEARCH_QUERY,
   PULL_REQUEST_SEARCH_QUERY,
+  REVIEW_COMMENTS_PAGE_QUERY,
+  REVIEWS_PAGE_QUERY,
   VIEWER_ID_QUERY,
   VIEWER_QUERY,
 } from "./github-queries.js";
@@ -150,6 +157,10 @@ export class GitHubService {
       { label: "discussion comments", run: () => this.fetchDiscussionComments(username) },
       { label: "pull requests", run: () => this.fetchPullRequests(username) },
       { label: "pull request comments", run: () => this.fetchPullRequestComments(username) },
+      {
+        label: "pull request review comments",
+        run: () => this.fetchPullRequestReviewComments(username),
+      },
       { label: "commits", run: () => this.fetchCommits(username) },
     ];
 
@@ -241,6 +252,7 @@ export class GitHubService {
     qualifiers: string;
     dateField: "created" | "updated";
     window?: DateRange;
+    extraVariables?: Record<string, unknown>;
   }): Promise<TNode[]> {
     const window = params.window ?? this.initialSearchWindow(params.dateField);
     const searchQuery = this.buildWindowedSearchQuery({
@@ -250,6 +262,7 @@ export class GitHubService {
     });
 
     let response: SearchResponse<TNode> = await this.execute<SearchResponse<TNode>>(params.query, {
+      ...params.extraVariables,
       searchQuery,
       first: 100,
       after: null,
@@ -276,6 +289,7 @@ export class GitHubService {
     const nodes = [...response.search.nodes];
     while (response.search.pageInfo.hasNextPage && response.search.pageInfo.endCursor) {
       response = await this.execute<SearchResponse<TNode>>(params.query, {
+        ...params.extraVariables,
         searchQuery,
         first: 100,
         after: response.search.pageInfo.endCursor,
@@ -514,6 +528,101 @@ export class GitHubService {
               visibility: node.repository.visibility,
             },
           });
+        }
+      }
+    }
+
+    return events;
+  }
+
+  // Mirrors fetchAllComments for the reviews connection of a pull request.
+  private async fetchAllReviews(params: {
+    nodeId: string;
+    reviews: ReviewsConnection;
+    reviewAuthor: string;
+  }): Promise<ReviewNode[]> {
+    const reviews = [...params.reviews.nodes];
+    let { hasNextPage, endCursor } = params.reviews.pageInfo;
+
+    while (hasNextPage && endCursor) {
+      const response: ReviewsPageResponse = await this.execute<ReviewsPageResponse>(
+        REVIEWS_PAGE_QUERY,
+        { nodeId: params.nodeId, first: 25, after: endCursor, reviewAuthor: params.reviewAuthor },
+      );
+      const page = response.node?.reviews;
+      if (!page) break;
+      reviews.push(...page.nodes);
+      ({ hasNextPage, endCursor } = page.pageInfo);
+    }
+
+    return reviews;
+  }
+
+  // Collects review feedback the user left on pull requests: review summary
+  // bodies (when non-empty) and inline review comments on the diff. Neither is
+  // part of the conversation `comments` connection, so the commenter: search
+  // never surfaces them; PRs are found via reviewed-by: instead.
+  private async fetchPullRequestReviewComments(username: string): Promise<GitHubEvent[]> {
+    const nodes = await this.searchAllNodes<PullRequestWithReviewsNode>({
+      query: PULL_REQUEST_REVIEW_SEARCH_QUERY,
+      qualifiers: `reviewed-by:${username} is:pr`,
+      dateField: "updated",
+      extraVariables: { reviewAuthor: username },
+    });
+
+    const events: GitHubEvent[] = [];
+    for (const node of nodes) {
+      if (!this.matchesVisibility(node.repository.visibility)) continue;
+
+      const repository = {
+        owner: node.repository.owner.login,
+        name: node.repository.name,
+        visibility: node.repository.visibility,
+      };
+
+      const reviews = await this.fetchAllReviews({
+        nodeId: node.id,
+        reviews: node.reviews,
+        reviewAuthor: username,
+      });
+      for (const review of reviews) {
+        // The query already filters by author server-side; this guard (and the
+        // per-comment one below) keeps the trust in our own filtering. Inline
+        // comments share the review's author, so other users' reviews can be
+        // skipped without paging their comments.
+        if (review.author?.login !== username) continue;
+
+        // A review drafted earlier counts from its submission time.
+        const reviewTimestamp = review.submittedAt ?? review.createdAt;
+        if (review.body !== "" && this.isWithinDateRange(reviewTimestamp)) {
+          events.push({
+            type: "PullRequestReviewComment",
+            createdAt: reviewTimestamp,
+            prTitle: node.title,
+            prUrl: node.url,
+            body: review.body,
+            url: review.url,
+            repository,
+          });
+        }
+
+        const comments = await this.fetchAllComments({
+          nodeId: review.id,
+          comments: review.comments,
+          pageQuery: REVIEW_COMMENTS_PAGE_QUERY,
+        });
+        for (const comment of comments) {
+          if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
+            events.push({
+              type: "PullRequestReviewComment",
+              createdAt: comment.createdAt,
+              prTitle: node.title,
+              prUrl: node.url,
+              body: comment.body,
+              url: comment.url,
+              repository,
+            });
+          }
         }
       }
     }
