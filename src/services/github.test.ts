@@ -425,7 +425,10 @@ describe("pull request review comments", () => {
             id: "REVIEW_1",
             body: "review summary in range",
             url: "https://github.com/owner/repo/pull/7#pullrequestreview-1",
+            // Drafted at 00:00, submitted at 02:00: the event must use the
+            // submission time.
             createdAt: "2024-01-05T00:00:00Z",
+            submittedAt: "2024-01-05T02:00:00Z",
             author: { login: "testuser" },
             comments: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -460,7 +463,12 @@ describe("pull request review comments", () => {
             url: "https://github.com/owner/repo/pull/7#pullrequestreview-3",
             createdAt: "2024-01-07T00:00:00Z",
             author: { login: "someone" },
-            comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            // A truthy cursor here proves the skipped review's comments are
+            // never paged.
+            comments: {
+              pageInfo: { hasNextPage: true, endCursor: "SKIPPED_REVIEW_CURSOR" },
+              nodes: [],
+            },
           },
         ],
       }),
@@ -472,7 +480,7 @@ describe("pull request review comments", () => {
     expect(reviewComments).toEqual([
       {
         type: "PullRequestReviewComment",
-        createdAt: "2024-01-05T00:00:00Z",
+        createdAt: "2024-01-05T02:00:00Z",
         prTitle: "Reviewed PR",
         prUrl: "https://github.com/owner/repo/pull/7",
         body: "review summary in range",
@@ -488,6 +496,55 @@ describe("pull request review comments", () => {
         url: "https://github.com/owner/repo/pull/7#discussion_r1",
         repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
       },
+    ]);
+
+    // The skipped other-author review must never have its comments paged.
+    const skippedPageCalls = calls.filter(
+      (call) => call.variables.after === "SKIPPED_REVIEW_CURSOR",
+    );
+    expect(skippedPageCalls).toEqual([]);
+  });
+
+  it("paginates a review's inline comment tail", async () => {
+    reviewSearchNodes.push(
+      reviewedPrNode({
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            id: "REVIEW_1",
+            body: "",
+            url: "https://github.com/owner/repo/pull/7#pullrequestreview-1",
+            createdAt: "2024-01-05T00:00:00Z",
+            submittedAt: "2024-01-05T00:00:00Z",
+            author: { login: "testuser" },
+            comments: {
+              pageInfo: { hasNextPage: true, endCursor: "REVIEW_COMMENT_CURSOR_2" },
+              nodes: [],
+            },
+          },
+        ],
+      }),
+    );
+    commentPagesByCursor.set("REVIEW_COMMENT_CURSOR_2", {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        {
+          body: "inline comment on the second page",
+          url: "https://github.com/owner/repo/pull/7#discussion_r9",
+          createdAt: "2024-01-09T00:00:00Z",
+          author: { login: "testuser" },
+        },
+      ],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const reviewComments = events.filter((event) => event.type === "PullRequestReviewComment");
+    expect(reviewComments.map((e) => e.body)).toEqual(["inline comment on the second page"]);
+
+    const pageCalls = calls.filter((call) => call.variables.after === "REVIEW_COMMENT_CURSOR_2");
+    expect(pageCalls.map((call) => call.variables)).toEqual([
+      { nodeId: "REVIEW_1", first: 100, after: "REVIEW_COMMENT_CURSOR_2" },
     ]);
   });
 
@@ -521,7 +578,7 @@ describe("pull request review comments", () => {
       (call) => call.query.includes("node(id:") && call.query.includes("reviews(first:"),
     );
     expect(reviewPageCalls.map((call) => call.variables)).toEqual([
-      { nodeId: "PR_NODE_ID", first: 25, after: "REVIEW_CURSOR_2" },
+      { nodeId: "PR_NODE_ID", first: 25, after: "REVIEW_CURSOR_2", reviewAuthor: "testuser" },
     ]);
   });
 });

@@ -106,6 +106,8 @@ export interface ReviewNode {
   body: string;
   url: string;
   createdAt: string;
+  /** Null while a review is a pending draft; set once it is submitted. */
+  submittedAt: string | null;
   author: { login: string } | null;
   comments: CommentsConnection;
 }

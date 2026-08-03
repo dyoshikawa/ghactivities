@@ -225,12 +225,18 @@ export const REVIEW_COMMENTS_PAGE_QUERY = buildCommentsPageQuery("PullRequestRev
 
 // Reviews carry both a summary body and the inline review comments left on the
 // diff. Nested `first` sizes stay small to respect GitHub's node limit; the
-// tails are fetched through the page queries below.
+// tails are fetched through the page queries below. The states filter excludes
+// PENDING so the viewer's draft reviews that are not yet submitted never leak
+// into the export, and the author argument skips other users' reviews
+// server-side.
+const REVIEW_STATES = "[COMMENTED, APPROVED, CHANGES_REQUESTED, DISMISSED]";
+
 const REVIEW_FIELDS = `
   id
   body
   url
   createdAt
+  submittedAt
   author { login }
   comments(first: 25) {
     pageInfo {
@@ -247,7 +253,7 @@ const REVIEW_FIELDS = `
 `;
 
 export const PULL_REQUEST_REVIEW_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
+  query ($searchQuery: String!, $first: Int!, $after: String, $reviewAuthor: String!) {
     search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
       issueCount
       pageInfo {
@@ -265,7 +271,7 @@ export const PULL_REQUEST_REVIEW_SEARCH_QUERY = `
             name
             visibility
           }
-          reviews(first: 25) {
+          reviews(first: 25, states: ${REVIEW_STATES}, author: $reviewAuthor) {
             pageInfo {
               hasNextPage
               endCursor
@@ -281,10 +287,10 @@ ${REVIEW_FIELDS}
 `;
 
 export const REVIEWS_PAGE_QUERY = `
-  query ($nodeId: ID!, $first: Int!, $after: String!) {
+  query ($nodeId: ID!, $first: Int!, $after: String!, $reviewAuthor: String!) {
     node(id: $nodeId) {
       ... on PullRequest {
-        reviews(first: $first, after: $after) {
+        reviews(first: $first, after: $after, states: ${REVIEW_STATES}, author: $reviewAuthor) {
           pageInfo {
             hasNextPage
             endCursor

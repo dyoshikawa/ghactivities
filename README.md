@@ -166,7 +166,7 @@ For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vert
 - Repositories with `INTERNAL` visibility (organization-internal repositories on GitHub Enterprise) are treated as private: they are included with `--visibility private` and `--visibility all`, and excluded with `--visibility public`.
 - Event types are fetched one at a time (not concurrently) to stay within GitHub's secondary rate limits. Transient API failures — rate limits and gateway errors — are retried up to 3 times, honoring the server-suggested wait when provided and falling back to exponential backoff. If fetching still fails, the error names the event type that was being fetched.
 - GitHub's Search API returns at most 1,000 results per query. When a query would exceed that cap, the date range is automatically split into smaller windows and searched again. If a single UTC day still exceeds the cap, the excess items are skipped and a warning is printed.
-- For issues, pull requests, and discussions, the range is matched at day granularity (the date portion of `--since`/`--until`); comments and commits are matched at full timestamp precision.
+- For issues, pull requests, and discussions, the range is matched at day granularity (the date portion of `--since`/`--until`); comments (including review summary bodies and inline review comments) and commits are matched at full timestamp precision. Review events use the review's submission time.
 
 ## License
 

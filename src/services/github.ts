@@ -252,6 +252,7 @@ export class GitHubService {
     qualifiers: string;
     dateField: "created" | "updated";
     window?: DateRange;
+    extraVariables?: Record<string, unknown>;
   }): Promise<TNode[]> {
     const window = params.window ?? this.initialSearchWindow(params.dateField);
     const searchQuery = this.buildWindowedSearchQuery({
@@ -261,6 +262,7 @@ export class GitHubService {
     });
 
     let response: SearchResponse<TNode> = await this.execute<SearchResponse<TNode>>(params.query, {
+      ...params.extraVariables,
       searchQuery,
       first: 100,
       after: null,
@@ -287,6 +289,7 @@ export class GitHubService {
     const nodes = [...response.search.nodes];
     while (response.search.pageInfo.hasNextPage && response.search.pageInfo.endCursor) {
       response = await this.execute<SearchResponse<TNode>>(params.query, {
+        ...params.extraVariables,
         searchQuery,
         first: 100,
         after: response.search.pageInfo.endCursor,
@@ -536,6 +539,7 @@ export class GitHubService {
   private async fetchAllReviews(params: {
     nodeId: string;
     reviews: ReviewsConnection;
+    reviewAuthor: string;
   }): Promise<ReviewNode[]> {
     const reviews = [...params.reviews.nodes];
     let { hasNextPage, endCursor } = params.reviews.pageInfo;
@@ -543,7 +547,7 @@ export class GitHubService {
     while (hasNextPage && endCursor) {
       const response: ReviewsPageResponse = await this.execute<ReviewsPageResponse>(
         REVIEWS_PAGE_QUERY,
-        { nodeId: params.nodeId, first: 25, after: endCursor },
+        { nodeId: params.nodeId, first: 25, after: endCursor, reviewAuthor: params.reviewAuthor },
       );
       const page = response.node?.reviews;
       if (!page) break;
@@ -563,6 +567,7 @@ export class GitHubService {
       query: PULL_REQUEST_REVIEW_SEARCH_QUERY,
       qualifiers: `reviewed-by:${username} is:pr`,
       dateField: "updated",
+      extraVariables: { reviewAuthor: username },
     });
 
     const events: GitHubEvent[] = [];
@@ -575,16 +580,24 @@ export class GitHubService {
         visibility: node.repository.visibility,
       };
 
-      const reviews = await this.fetchAllReviews({ nodeId: node.id, reviews: node.reviews });
+      const reviews = await this.fetchAllReviews({
+        nodeId: node.id,
+        reviews: node.reviews,
+        reviewAuthor: username,
+      });
       for (const review of reviews) {
-        // A review's inline comments share the review's author, so other
-        // users' reviews can be skipped without paging their comments.
+        // The query already filters by author server-side; this guard (and the
+        // per-comment one below) keeps the trust in our own filtering. Inline
+        // comments share the review's author, so other users' reviews can be
+        // skipped without paging their comments.
         if (review.author?.login !== username) continue;
 
-        if (review.body !== "" && this.isWithinDateRange(review.createdAt)) {
+        // A review drafted earlier counts from its submission time.
+        const reviewTimestamp = review.submittedAt ?? review.createdAt;
+        if (review.body !== "" && this.isWithinDateRange(reviewTimestamp)) {
           events.push({
             type: "PullRequestReviewComment",
-            createdAt: review.createdAt,
+            createdAt: reviewTimestamp,
             prTitle: node.title,
             prUrl: node.url,
             body: review.body,
