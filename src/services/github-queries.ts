@@ -6,6 +6,19 @@ export const VIEWER_QUERY = `
   }
 `;
 
+// Prior revisions of an edited comment (newest first). Capped at 5 per
+// comment: the review search already nests PR > reviews > comments, and a
+// larger page would push the query over GitHub's 500,000-node limit.
+const CONTENT_EDIT_FIELDS = `
+  userContentEdits(first: 5) {
+    nodes {
+      editedAt
+      deletedAt
+      diff
+    }
+  }
+`;
+
 export const ISSUE_SEARCH_QUERY = `
   query ($searchQuery: String!, $first: Int!, $after: String) {
     search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
@@ -60,6 +73,7 @@ export const ISSUE_COMMENT_SEARCH_QUERY = `
               url
               createdAt
               author { login }
+              ${CONTENT_EDIT_FIELDS}
             }
           }
         }
@@ -122,6 +136,7 @@ export const DISCUSSION_COMMENT_SEARCH_QUERY = `
               url
               createdAt
               author { login }
+              ${CONTENT_EDIT_FIELDS}
             }
           }
         }
@@ -184,6 +199,7 @@ export const PULL_REQUEST_COMMENT_SEARCH_QUERY = `
               url
               createdAt
               author { login }
+              ${CONTENT_EDIT_FIELDS}
             }
           }
         }
@@ -211,6 +227,7 @@ const buildCommentsPageQuery = (
             url
             createdAt
             author { login }
+            ${CONTENT_EDIT_FIELDS}
           }
         }
       }
@@ -238,6 +255,7 @@ const REVIEW_FIELDS = `
   createdAt
   submittedAt
   author { login }
+  ${CONTENT_EDIT_FIELDS}
   comments(first: 25) {
     pageInfo {
       hasNextPage
@@ -248,6 +266,7 @@ const REVIEW_FIELDS = `
       url
       createdAt
       author { login }
+      ${CONTENT_EDIT_FIELDS}
     }
   }
 `;
@@ -339,6 +358,7 @@ export const COMMIT_HISTORY_QUERY = `
   query ($owner: String!, $name: String!, $since: GitTimestamp!, $until: GitTimestamp!, $first: Int!, $after: String, $authorId: ID!) {
     repository(owner: $owner, name: $name) {
       defaultBranchRef {
+        name
         target {
           ... on Commit {
             history(since: $since, until: $until, first: $first, after: $after, author: { id: $authorId }) {
@@ -367,6 +387,214 @@ export const USER_ID_QUERY = `
   query ($login: String!) {
     user(login: $login) {
       id
+    }
+  }
+`;
+
+export const BRANCH_REFS_QUERY = `
+  query ($owner: String!, $name: String!, $first: Int!, $after: String) {
+    repository(owner: $owner, name: $name) {
+      refs(refPrefix: "refs/heads/", first: $first, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          name
+        }
+      }
+    }
+  }
+`;
+
+export const BRANCH_COMMIT_HISTORY_QUERY = `
+  query ($owner: String!, $name: String!, $qualifiedName: String!, $since: GitTimestamp!, $until: GitTimestamp!, $first: Int!, $after: String, $authorId: ID!) {
+    repository(owner: $owner, name: $name) {
+      ref(qualifiedName: $qualifiedName) {
+        target {
+          ... on Commit {
+            history(since: $since, until: $until, first: $first, after: $after, author: { id: $authorId }) {
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+              nodes {
+                oid
+                message
+                url
+                committedDate
+                author {
+                  user { login }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const GISTS_QUERY = `
+  query ($login: String!, $first: Int!, $after: String) {
+    user(login: $login) {
+      gists(privacy: ALL, first: $first, after: $after, orderBy: { field: CREATED_AT, direction: DESC }) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          name
+          description
+          url
+          createdAt
+          isPublic
+          files(limit: 50) {
+            name
+            size
+            text
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const COMMIT_COMMENTS_QUERY = `
+  query ($login: String!, $first: Int!, $after: String) {
+    user(login: $login) {
+      commitComments(first: $first, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          body
+          url
+          createdAt
+          commit { oid }
+          repository {
+            owner { login }
+            name
+            visibility
+          }
+          ${CONTENT_EDIT_FIELDS}
+        }
+      }
+    }
+  }
+`;
+
+const RELEASE_FIELDS = `
+  name
+  tagName
+  url
+  createdAt
+  description
+  isPrerelease
+  isDraft
+  author { login }
+  releaseAssets(first: 50) {
+    nodes {
+      name
+      downloadUrl
+      size
+      contentType
+    }
+  }
+`;
+
+// The releases connection is ordered newest-first so the per-repository scan
+// can stop as soon as it reaches a release older than --since.
+export const REPOSITORIES_WITH_RELEASES_QUERY = `
+  query ($login: String!, $first: Int!, $after: String) {
+    user(login: $login) {
+      repositories(ownerAffiliations: [OWNER], first: $first, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          owner { login }
+          name
+          visibility
+          releases(first: 25, orderBy: { field: CREATED_AT, direction: DESC }) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              ${RELEASE_FIELDS}
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const RELEASES_PAGE_QUERY = `
+  query ($owner: String!, $name: String!, $first: Int!, $after: String!) {
+    repository(owner: $owner, name: $name) {
+      releases(first: $first, after: $after, orderBy: { field: CREATED_AT, direction: DESC }) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          ${RELEASE_FIELDS}
+        }
+      }
+    }
+  }
+`;
+
+// Newest-first so the scan can stop at the first repository created before
+// --since. The object expression reads README.md from the default branch.
+export const CREATED_REPOSITORIES_QUERY = `
+  query ($login: String!, $first: Int!, $after: String) {
+    user(login: $login) {
+      repositories(ownerAffiliations: [OWNER], first: $first, after: $after, orderBy: { field: CREATED_AT, direction: DESC }) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          owner { login }
+          name
+          visibility
+          url
+          description
+          createdAt
+          isFork
+          object(expression: "HEAD:README.md") {
+            ... on Blob {
+              text
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+// Newest-pushed-first so the --branches all repository discovery can stop at
+// the first repository whose last push predates --since.
+export const PUSHED_REPOSITORIES_QUERY = `
+  query ($login: String!, $first: Int!, $after: String) {
+    user(login: $login) {
+      repositories(ownerAffiliations: [OWNER], first: $first, after: $after, orderBy: { field: PUSHED_AT, direction: DESC }) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          owner { login }
+          name
+          visibility
+          pushedAt
+        }
+      }
     }
   }
 `;

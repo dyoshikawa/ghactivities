@@ -1,25 +1,39 @@
 import { graphql } from "@octokit/graphql";
 
-import type { Visibility } from "../types/cli.js";
-import type { GitHubEvent } from "../types/events.js";
+import type { Branches, Visibility } from "../types/cli.js";
+import type { CommitDiffFile, CommitEvent, ContentEdit, GitHubEvent } from "../types/events.js";
 import type {
+  BranchCommitHistoryResponse,
+  BranchRefsResponse,
   CommentNode,
   CommentsConnection,
   CommentsPageResponse,
+  CommitCommentsResponse,
+  CommitHistoryNode,
   CommitHistoryResponse,
   ContributionsCollectionResponse,
+  CreatedRepositoriesResponse,
   DiscussionNode,
   DiscussionWithCommentsNode,
+  GistsResponse,
   IssueNode,
   IssueWithCommentsNode,
   PullRequestNode,
   PullRequestWithCommentsNode,
   PullRequestWithReviewsNode,
+  PushedRepositoriesResponse,
+  ReleasesConnection,
+  ReleasesPageResponse,
+  RepositoriesWithReleasesResponse,
   RepositoryVisibility,
+  RepositoryWithReleasesNode,
+  RestCommitDetail,
+  RestUserEvent,
   ReviewNode,
   ReviewsConnection,
   ReviewsPageResponse,
   SearchResponse,
+  UserContentEditsConnection,
   UserIdResponse,
   ViewerResponse,
 } from "../types/github-api.js";
@@ -34,11 +48,16 @@ import {
 import { formatError } from "../utils/error.js";
 import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
 import {
+  BRANCH_COMMIT_HISTORY_QUERY,
+  BRANCH_REFS_QUERY,
+  COMMIT_COMMENTS_QUERY,
   COMMIT_HISTORY_QUERY,
   CONTRIBUTIONS_COLLECTION_QUERY,
+  CREATED_REPOSITORIES_QUERY,
   DISCUSSION_COMMENT_SEARCH_QUERY,
   DISCUSSION_COMMENTS_PAGE_QUERY,
   DISCUSSION_SEARCH_QUERY,
+  GISTS_QUERY,
   ISSUE_COMMENT_SEARCH_QUERY,
   ISSUE_COMMENTS_PAGE_QUERY,
   ISSUE_SEARCH_QUERY,
@@ -46,6 +65,9 @@ import {
   PULL_REQUEST_COMMENTS_PAGE_QUERY,
   PULL_REQUEST_REVIEW_SEARCH_QUERY,
   PULL_REQUEST_SEARCH_QUERY,
+  PUSHED_REPOSITORIES_QUERY,
+  RELEASES_PAGE_QUERY,
+  REPOSITORIES_WITH_RELEASES_QUERY,
   REVIEW_COMMENTS_PAGE_QUERY,
   REVIEWS_PAGE_QUERY,
   USER_ID_QUERY,
@@ -59,12 +81,23 @@ interface GitHubServiceParams {
   since: Date;
   until: Date;
   visibility: Visibility;
+  /** Collect commits from the default branch only, or from every branch. */
+  branches?: Branches | undefined;
+  /** Attach per-file diffs to Commit events (one extra REST call per commit). */
+  commitDiff?: boolean | undefined;
   onWarning?: (message: string) => void;
   retry?: {
     maxRetries?: number;
     baseDelayMs?: number;
   };
 }
+
+const GITHUB_REST_BASE_URL = "https://api.github.com";
+
+// The events feed behind wiki-edit collection is capped by GitHub.
+const EVENTS_FEED_MAX_PAGES = 3;
+const EVENTS_FEED_PAGE_SIZE = 100;
+const EVENTS_FEED_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
 // GitHub's Search API never returns more than 1,000 results per query.
 const SEARCH_RESULT_CAP = 1000;
@@ -87,10 +120,37 @@ interface GitHubApiErrorShape {
   errors?: { type?: string }[];
 }
 
+// Maps a comment's prior revisions to the event's editHistory field;
+// undefined (field omitted) when the comment was never edited.
+function toEditHistory(
+  edits: UserContentEditsConnection | null | undefined,
+): ContentEdit[] | undefined {
+  const nodes = edits?.nodes ?? [];
+  if (nodes.length === 0) return undefined;
+  return nodes.map((edit) => ({
+    editedAt: edit.editedAt,
+    deletedAt: edit.deletedAt,
+    diff: edit.diff,
+  }));
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+// GraphQL errors raised when the token cannot access a resource at all, e.g.
+// a fine-grained token without the Gists read permission.
+function isTokenAccessError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const err = error as GitHubApiErrorShape;
+  return (
+    err.errors?.some(
+      (graphqlError) =>
+        graphqlError.type === "FORBIDDEN" || graphqlError.type === "INSUFFICIENT_SCOPES",
+    ) ?? false
+  );
 }
 
 function isRetryableError(error: unknown): boolean {
@@ -125,6 +185,7 @@ export function computeRetryDelayMs(params: {
 
 export class GitHubService {
   private readonly graphqlWithAuth: typeof graphql;
+  private readonly token: string;
   private readonly username: string | undefined;
   // Caches the id lookup, which runs both as the up-front --user existence
   // check and for the commit history author filter.
@@ -132,6 +193,8 @@ export class GitHubService {
   private readonly since: Date;
   private readonly until: Date;
   private readonly visibility: Visibility;
+  private readonly branches: Branches;
+  private readonly commitDiff: boolean;
   private readonly onWarning: (message: string) => void;
   private readonly maxRetries: number;
   private readonly retryBaseDelayMs: number;
@@ -140,10 +203,13 @@ export class GitHubService {
     this.graphqlWithAuth = graphql.defaults({
       headers: { authorization: `token ${params.token}` },
     });
+    this.token = params.token;
     this.username = params.username;
     this.since = params.since;
     this.until = params.until;
     this.visibility = params.visibility;
+    this.branches = params.branches ?? "default";
+    this.commitDiff = params.commitDiff ?? false;
     this.onWarning = params.onWarning ?? (() => {});
     this.maxRetries = params.retry?.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryBaseDelayMs = params.retry?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
@@ -190,6 +256,11 @@ export class GitHubService {
         run: () => this.fetchPullRequestReviewComments(username),
       },
       { label: "commits", run: () => this.fetchCommits(username) },
+      { label: "commit comments", run: () => this.fetchCommitComments(username) },
+      { label: "gists", run: () => this.fetchGists(username) },
+      { label: "releases", run: () => this.fetchReleases(username) },
+      { label: "repositories", run: () => this.fetchCreatedRepositories(username) },
+      { label: "wiki page edits", run: () => this.fetchWikiPageEdits(username) },
     ];
 
     const events: GitHubEvent[] = [];
@@ -205,13 +276,13 @@ export class GitHubService {
     return events;
   }
 
-  // Executes a GraphQL request, retrying transient failures (rate limits and
-  // gateway errors) with the server-suggested delay when available, falling
-  // back to exponential backoff.
-  private async execute<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  // Runs a request, retrying transient failures (rate limits and gateway
+  // errors) with the server-suggested delay when available, falling back to
+  // exponential backoff.
+  private async withRetry<T>(run: () => Promise<T>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.graphqlWithAuth<T>(query, variables ?? {});
+        return await run();
       } catch (error) {
         if (attempt >= this.maxRetries || !isRetryableError(error)) throw error;
         const delayMs = computeRetryDelayMs({
@@ -225,6 +296,37 @@ export class GitHubService {
         await sleep(delayMs);
       }
     }
+  }
+
+  private async execute<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    return this.withRetry(() => this.graphqlWithAuth<T>(query, variables ?? {}));
+  }
+
+  // Minimal REST client for the endpoints the GraphQL API does not cover
+  // (commit diffs and the user events feed). Reuses the GraphQL retry policy:
+  // the thrown error carries `status` and `headers` in the same shape.
+  private async executeRest<T>(path: string): Promise<T> {
+    return this.withRetry(async () => {
+      const response = await fetch(`${GITHUB_REST_BASE_URL}${path}`, {
+        headers: {
+          authorization: `token ${this.token}`,
+          accept: "application/vnd.github+json",
+          "user-agent": "ghactivities",
+          "x-github-api-version": "2022-11-28",
+        },
+      });
+      if (!response.ok) {
+        const error = new Error(
+          `GitHub REST API request to ${path} failed with status ${String(response.status)}`,
+        );
+        Object.assign(error, {
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+        });
+        throw error;
+      }
+      return (await response.json()) as T;
+    });
   }
 
   private async getViewerLogin(): Promise<string> {
@@ -414,6 +516,7 @@ export class GitHubService {
       });
       for (const comment of comments) {
         if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
+          const editHistory = toEditHistory(comment.userContentEdits);
           events.push({
             type: "IssueComment",
             createdAt: comment.createdAt,
@@ -426,6 +529,7 @@ export class GitHubService {
               name: node.repository.name,
               visibility: node.repository.visibility,
             },
+            ...(editHistory ? { editHistory } : {}),
           });
         }
       }
@@ -480,6 +584,7 @@ export class GitHubService {
       });
       for (const comment of comments) {
         if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
+          const editHistory = toEditHistory(comment.userContentEdits);
           events.push({
             type: "DiscussionComment",
             createdAt: comment.createdAt,
@@ -492,6 +597,7 @@ export class GitHubService {
               name: node.repository.name,
               visibility: node.repository.visibility,
             },
+            ...(editHistory ? { editHistory } : {}),
           });
         }
       }
@@ -546,6 +652,7 @@ export class GitHubService {
       });
       for (const comment of comments) {
         if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
+          const editHistory = toEditHistory(comment.userContentEdits);
           events.push({
             type: "PullRequestComment",
             createdAt: comment.createdAt,
@@ -558,6 +665,7 @@ export class GitHubService {
               name: node.repository.name,
               visibility: node.repository.visibility,
             },
+            ...(editHistory ? { editHistory } : {}),
           });
         }
       }
@@ -626,6 +734,7 @@ export class GitHubService {
         // A review drafted earlier counts from its submission time.
         const reviewTimestamp = review.submittedAt ?? review.createdAt;
         if (review.body !== "" && this.isWithinDateRange(reviewTimestamp)) {
+          const editHistory = toEditHistory(review.userContentEdits);
           events.push({
             type: "PullRequestReviewComment",
             createdAt: reviewTimestamp,
@@ -634,6 +743,7 @@ export class GitHubService {
             body: review.body,
             url: review.url,
             repository,
+            ...(editHistory ? { editHistory } : {}),
           });
         }
 
@@ -644,6 +754,7 @@ export class GitHubService {
         });
         for (const comment of comments) {
           if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
+            const editHistory = toEditHistory(comment.userContentEdits);
             events.push({
               type: "PullRequestReviewComment",
               createdAt: comment.createdAt,
@@ -652,6 +763,7 @@ export class GitHubService {
               body: comment.body,
               url: comment.url,
               repository,
+              ...(editHistory ? { editHistory } : {}),
             });
           }
         }
@@ -661,15 +773,19 @@ export class GitHubService {
     return events;
   }
 
-  private async fetchCommits(username: string): Promise<GitHubEvent[]> {
-    const events: GitHubEvent[] = [];
-    const authorId = await this.getUserId(username);
+  // Discovers repositories to scan for commits. contributionsCollection only
+  // counts default-branch (and gh-pages) commits, so with --branches all the
+  // user's own repositories pushed within the range are added on top; branches
+  // of unowned repositories without default-branch contributions can still be
+  // missed (documented in the README).
+  private async discoverCommitRepositories(
+    username: string,
+  ): Promise<Map<string, RepositoryVisibility>> {
+    const repoMap = new Map<string, RepositoryVisibility>();
     const periods = splitDateRangeIntoYearPeriods({
       since: this.since,
       until: this.until,
     });
-
-    const repoMap = new Map<string, RepositoryVisibility>();
 
     for (const period of periods) {
       const response = await this.execute<ContributionsCollectionResponse>(
@@ -689,46 +805,487 @@ export class GitHubService {
       }
     }
 
-    for (const [repoKey, visibility] of repoMap) {
-      const [owner, name] = repoKey.split("/") as [string, string];
-      let cursor: string | null = null;
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const response: CommitHistoryResponse = await this.execute<CommitHistoryResponse>(
-          COMMIT_HISTORY_QUERY,
+    if (this.branches === "all") {
+      let after: string | null = null;
+      let hasNext = true;
+      while (hasNext) {
+        const response: PushedRepositoriesResponse = await this.execute<PushedRepositoriesResponse>(
+          PUSHED_REPOSITORIES_QUERY,
           {
-            owner,
-            name,
-            since: this.since.toISOString(),
-            until: this.until.toISOString(),
-            first: 100,
-            after: cursor,
-            authorId,
+            login: username,
+            first: 50,
+            after,
           },
         );
+        const connection = response.user?.repositories;
+        if (!connection) break;
+        let reachedOlder = false;
+        for (const node of connection.nodes) {
+          if (node.pushedAt === null || new Date(node.pushedAt) < this.since) {
+            reachedOlder = true;
+            break;
+          }
+          if (this.matchesVisibility(node.visibility)) {
+            repoMap.set(`${node.owner.login}/${node.name}`, node.visibility);
+          }
+        }
+        hasNext =
+          !reachedOlder &&
+          connection.pageInfo.hasNextPage &&
+          connection.pageInfo.endCursor !== null;
+        after = connection.pageInfo.endCursor;
+      }
+    }
 
+    return repoMap;
+  }
+
+  // Pages one branch's commit history. The history connection shape is shared
+  // by the default-branch and per-ref queries.
+  private async collectBranchHistory(params: {
+    owner: string;
+    name: string;
+    branch: string | null;
+    authorId: string;
+  }): Promise<{ branch: string; nodes: CommitHistoryNode[] } | null> {
+    const nodes: CommitHistoryNode[] = [];
+    let branchName = params.branch;
+    let cursor: string | null = null;
+    let hasNext = true;
+
+    while (hasNext) {
+      const variables = {
+        owner: params.owner,
+        name: params.name,
+        since: this.since.toISOString(),
+        until: this.until.toISOString(),
+        first: 100,
+        after: cursor,
+        authorId: params.authorId,
+      };
+
+      let history: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: CommitHistoryNode[];
+      };
+      if (params.branch === null) {
+        const response: CommitHistoryResponse = await this.execute<CommitHistoryResponse>(
+          COMMIT_HISTORY_QUERY,
+          variables,
+        );
         const ref = response.repository.defaultBranchRef;
-        if (!ref) break;
+        if (!ref) return null;
+        branchName = ref.name;
+        history = ref.target.history;
+      } else {
+        const response: BranchCommitHistoryResponse =
+          await this.execute<BranchCommitHistoryResponse>(BRANCH_COMMIT_HISTORY_QUERY, {
+            ...variables,
+            qualifiedName: `refs/heads/${params.branch}`,
+          });
+        const target = response.repository?.ref?.target;
+        if (!target?.history) return null;
+        history = target.history;
+      }
 
-        for (const node of ref.target.history.nodes) {
+      nodes.push(...history.nodes);
+      hasNext = history.pageInfo.hasNextPage && history.pageInfo.endCursor !== null;
+      cursor = history.pageInfo.endCursor;
+    }
+
+    return branchName === null ? null : { branch: branchName, nodes };
+  }
+
+  private async listBranches(params: { owner: string; name: string }): Promise<string[]> {
+    const branches: string[] = [];
+    let after: string | null = null;
+    let hasNext = true;
+    while (hasNext) {
+      const response: BranchRefsResponse = await this.execute<BranchRefsResponse>(
+        BRANCH_REFS_QUERY,
+        { owner: params.owner, name: params.name, first: 100, after },
+      );
+      const refs = response.repository?.refs;
+      if (!refs) break;
+      branches.push(...refs.nodes.map((node) => node.name));
+      hasNext = refs.pageInfo.hasNextPage && refs.pageInfo.endCursor !== null;
+      after = refs.pageInfo.endCursor;
+    }
+    return branches;
+  }
+
+  private async fetchCommitDiff(params: {
+    owner: string;
+    name: string;
+    oid: string;
+  }): Promise<CommitDiffFile[]> {
+    const detail = await this.executeRest<RestCommitDetail>(
+      `/repos/${params.owner}/${params.name}/commits/${params.oid}`,
+    );
+    return (detail.files ?? []).map((file) => ({
+      filename: file.filename,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      patch: file.patch ?? null,
+    }));
+  }
+
+  private async fetchCommits(username: string): Promise<GitHubEvent[]> {
+    const events: GitHubEvent[] = [];
+    const authorId = await this.getUserId(username);
+    const repoMap = await this.discoverCommitRepositories(username);
+
+    for (const [repoKey, visibility] of repoMap) {
+      const [owner, name] = repoKey.split("/") as [string, string];
+
+      // With --branches all, the same commit is usually reachable from several
+      // branches; it is emitted once, listing every branch it was seen on.
+      const commitsByOid = new Map<string, { node: CommitHistoryNode; branches: string[] }>();
+      const branchNames =
+        this.branches === "all" ? await this.listBranches({ owner, name }) : [null];
+
+      for (const branch of branchNames) {
+        const result = await this.collectBranchHistory({ owner, name, branch, authorId });
+        if (!result) continue;
+        for (const node of result.nodes) {
+          const entry = commitsByOid.get(node.oid);
+          if (entry) {
+            entry.branches.push(result.branch);
+          } else {
+            commitsByOid.set(node.oid, { node, branches: [result.branch] });
+          }
+        }
+      }
+
+      for (const { node, branches } of commitsByOid.values()) {
+        const event: CommitEvent = {
+          type: "Commit",
+          createdAt: node.committedDate,
+          message: node.message,
+          url: node.url,
+          oid: node.oid,
+          branches,
+          repository: {
+            owner,
+            name,
+            visibility,
+          },
+        };
+        if (this.commitDiff) {
+          event.diff = await this.fetchCommitDiff({ owner, name, oid: node.oid });
+        }
+        events.push(event);
+      }
+    }
+
+    return events;
+  }
+
+  private async fetchCommitComments(username: string): Promise<GitHubEvent[]> {
+    const events: GitHubEvent[] = [];
+    let after: string | null = null;
+    let hasNext = true;
+
+    // The commitComments connection has no orderBy, so every page is scanned
+    // and filtered by the date range.
+    while (hasNext) {
+      const response: CommitCommentsResponse = await this.execute<CommitCommentsResponse>(
+        COMMIT_COMMENTS_QUERY,
+        { login: username, first: 100, after },
+      );
+      const connection = response.user?.commitComments;
+      if (!connection) break;
+
+      for (const node of connection.nodes) {
+        if (!this.matchesVisibility(node.repository.visibility)) continue;
+        if (!this.isWithinDateRange(node.createdAt)) continue;
+        const editHistory = toEditHistory(node.userContentEdits);
+        events.push({
+          type: "CommitComment",
+          createdAt: node.createdAt,
+          body: node.body,
+          url: node.url,
+          commitOid: node.commit?.oid ?? null,
+          repository: {
+            owner: node.repository.owner.login,
+            name: node.repository.name,
+            visibility: node.repository.visibility,
+          },
+          ...(editHistory ? { editHistory } : {}),
+        });
+      }
+
+      hasNext = connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
+      after = connection.pageInfo.endCursor;
+    }
+
+    return events;
+  }
+
+  // Gists need their own token permission (the "gist" scope, or Gists read
+  // access on fine-grained tokens). A token without it should not fail the
+  // whole collection run, so the fetch degrades to a warning.
+  private async fetchGists(username: string): Promise<GitHubEvent[]> {
+    try {
+      return await this.collectGists(username);
+    } catch (error) {
+      if (isTokenAccessError(error)) {
+        this.onWarning(
+          `Gists could not be collected (${formatError(error)}); grant the token gist read access to include them.`,
+        );
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async collectGists(username: string): Promise<GitHubEvent[]> {
+    const events: GitHubEvent[] = [];
+    let after: string | null = null;
+    let hasNext = true;
+
+    while (hasNext) {
+      const response: GistsResponse = await this.execute<GistsResponse>(GISTS_QUERY, {
+        login: username,
+        first: 100,
+        after,
+      });
+      const connection = response.user?.gists;
+      if (!connection) break;
+
+      // Newest first: everything after the first gist older than --since is
+      // out of range too.
+      let reachedOlder = false;
+      for (const node of connection.nodes) {
+        if (new Date(node.createdAt) < this.since) {
+          reachedOlder = true;
+          break;
+        }
+        // Secret gists group with private repositories.
+        const visibility: RepositoryVisibility = node.isPublic ? "PUBLIC" : "PRIVATE";
+        if (!this.matchesVisibility(visibility)) continue;
+        if (!this.isWithinDateRange(node.createdAt)) continue;
+        events.push({
+          type: "Gist",
+          createdAt: node.createdAt,
+          description: node.description,
+          url: node.url,
+          files: node.files.map((file) => ({
+            name: file.name,
+            size: file.size,
+            text: file.text,
+          })),
+          repository: {
+            owner: username,
+            name: node.name,
+            visibility,
+          },
+        });
+      }
+
+      hasNext =
+        !reachedOlder && connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
+      after = connection.pageInfo.endCursor;
+    }
+
+    return events;
+  }
+
+  // Collects the in-range releases of one repository, paging past the first
+  // 25 only while the (newest-first) scan is still inside the date range.
+  private async collectRepositoryReleases(params: {
+    repo: RepositoryWithReleasesNode;
+    username: string;
+  }): Promise<GitHubEvent[]> {
+    const { repo, username } = params;
+    if (!this.matchesVisibility(repo.visibility)) return [];
+
+    const events: GitHubEvent[] = [];
+    let connection: ReleasesConnection = repo.releases;
+
+    for (;;) {
+      let reachedOlder = false;
+      for (const release of connection.nodes) {
+        if (new Date(release.createdAt) < this.since) {
+          reachedOlder = true;
+          break;
+        }
+        if (release.author?.login !== username) continue;
+        if (!this.isWithinDateRange(release.createdAt)) continue;
+        events.push({
+          type: "Release",
+          createdAt: release.createdAt,
+          title: release.name ?? release.tagName,
+          tagName: release.tagName,
+          url: release.url,
+          body: release.description,
+          isPrerelease: release.isPrerelease,
+          isDraft: release.isDraft,
+          assets: release.releaseAssets.nodes.map((asset) => ({
+            name: asset.name,
+            url: asset.downloadUrl,
+            size: asset.size,
+            contentType: asset.contentType,
+          })),
+          repository: {
+            owner: repo.owner.login,
+            name: repo.name,
+            visibility: repo.visibility,
+          },
+        });
+      }
+
+      if (reachedOlder || !connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
+        break;
+      }
+      const response: ReleasesPageResponse = await this.execute<ReleasesPageResponse>(
+        RELEASES_PAGE_QUERY,
+        {
+          owner: repo.owner.login,
+          name: repo.name,
+          first: 25,
+          after: connection.pageInfo.endCursor,
+        },
+      );
+      if (!response.repository) break;
+      connection = response.repository.releases;
+    }
+
+    return events;
+  }
+
+  // Releases are discovered by walking the user's own repositories; releases
+  // the user published in repositories they do not own are not collected
+  // (documented in the README).
+  private async fetchReleases(username: string): Promise<GitHubEvent[]> {
+    const events: GitHubEvent[] = [];
+    let after: string | null = null;
+    let hasNext = true;
+
+    while (hasNext) {
+      const response: RepositoriesWithReleasesResponse =
+        await this.execute<RepositoriesWithReleasesResponse>(REPOSITORIES_WITH_RELEASES_QUERY, {
+          login: username,
+          first: 50,
+          after,
+        });
+      const connection = response.user?.repositories;
+      if (!connection) break;
+
+      for (const repo of connection.nodes) {
+        events.push(...(await this.collectRepositoryReleases({ repo, username })));
+      }
+
+      hasNext = connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
+      after = connection.pageInfo.endCursor;
+    }
+
+    return events;
+  }
+
+  private async fetchCreatedRepositories(username: string): Promise<GitHubEvent[]> {
+    const events: GitHubEvent[] = [];
+    let after: string | null = null;
+    let hasNext = true;
+
+    while (hasNext) {
+      const response: CreatedRepositoriesResponse = await this.execute<CreatedRepositoriesResponse>(
+        CREATED_REPOSITORIES_QUERY,
+        {
+          login: username,
+          first: 50,
+          after,
+        },
+      );
+      const connection = response.user?.repositories;
+      if (!connection) break;
+
+      // Newest first: stop at the first repository created before --since.
+      let reachedOlder = false;
+      for (const node of connection.nodes) {
+        if (new Date(node.createdAt) < this.since) {
+          reachedOlder = true;
+          break;
+        }
+        if (!this.matchesVisibility(node.visibility)) continue;
+        if (!this.isWithinDateRange(node.createdAt)) continue;
+        events.push({
+          type: "Repository",
+          createdAt: node.createdAt,
+          url: node.url,
+          description: node.description,
+          isFork: node.isFork,
+          readme: node.object?.text ?? null,
+          repository: {
+            owner: node.owner.login,
+            name: node.name,
+            visibility: node.visibility,
+          },
+        });
+      }
+
+      hasNext =
+        !reachedOlder && connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
+      after = connection.pageInfo.endCursor;
+    }
+
+    return events;
+  }
+
+  // Wiki edits have no GraphQL or dedicated REST API; the user events feed is
+  // the only source, and GitHub caps it at the most recent 300 events within
+  // 90 days. A warning is emitted when that window cannot cover --since.
+  private async fetchWikiPageEdits(username: string): Promise<GitHubEvent[]> {
+    const events: GitHubEvent[] = [];
+
+    if (Date.now() - this.since.getTime() > EVENTS_FEED_MAX_AGE_MS) {
+      this.onWarning(
+        "Wiki page edits come from the GitHub events feed, which only covers the most recent 90 days; older wiki edits in the range are missing.",
+      );
+    }
+
+    let feedExhausted = false;
+    let oldestSeen: Date | null = null;
+
+    for (let page = 1; page <= EVENTS_FEED_MAX_PAGES; page++) {
+      const items = await this.executeRest<RestUserEvent[]>(
+        `/users/${username}/events?per_page=${String(EVENTS_FEED_PAGE_SIZE)}&page=${String(page)}`,
+      );
+
+      for (const item of items) {
+        const createdAt = new Date(item.created_at);
+        if (oldestSeen === null || createdAt < oldestSeen) oldestSeen = createdAt;
+        if (item.type !== "GollumEvent") continue;
+        if (!this.isWithinDateRange(item.created_at)) continue;
+        // The feed only distinguishes public from non-public.
+        const visibility: RepositoryVisibility = item.public ? "PUBLIC" : "PRIVATE";
+        if (!this.matchesVisibility(visibility)) continue;
+        const [owner, name] = item.repo.name.split("/") as [string, string];
+        for (const wikiPage of item.payload.pages ?? []) {
           events.push({
-            type: "Commit",
-            createdAt: node.committedDate,
-            message: node.message,
-            url: node.url,
-            oid: node.oid,
-            repository: {
-              owner,
-              name,
-              visibility,
-            },
+            type: "WikiPageEdit",
+            createdAt: item.created_at,
+            pageTitle: wikiPage.title,
+            action: wikiPage.action,
+            url: wikiPage.html_url,
+            repository: { owner, name, visibility },
           });
         }
-
-        if (!ref.target.history.pageInfo.hasNextPage) break;
-        cursor = ref.target.history.pageInfo.endCursor;
       }
+
+      if (items.length < EVENTS_FEED_PAGE_SIZE) {
+        feedExhausted = true;
+        break;
+      }
+      // The feed is newest-first: once past --since, older pages are irrelevant.
+      if (oldestSeen !== null && oldestSeen < this.since) break;
+    }
+
+    if (!feedExhausted && oldestSeen !== null && oldestSeen > this.since) {
+      this.onWarning(
+        "The GitHub events feed returns at most 300 events and did not reach --since; some wiki page edits in the range may be missing.",
+      );
     }
 
     return events;

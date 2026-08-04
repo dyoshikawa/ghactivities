@@ -14,6 +14,17 @@ const {
   reviewPagesByCursor,
   searchResponsesByQuery,
   failures,
+  contributionRepos,
+  defaultBranchHistoryNodes,
+  branchRefNodes,
+  branchHistoryByRef,
+  gistNodes,
+  commitCommentNodes,
+  releaseRepoNodes,
+  createdRepoNodes,
+  pushedRepoNodes,
+  restCalls,
+  restResponsesByPath,
 } = vi.hoisted(() => ({
   calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
   issueCommentSearchNodes: [] as unknown[],
@@ -25,6 +36,18 @@ const {
   // whose query or searchQuery contains the substring reject with the next
   // error from the list.
   failures: new Map<string, unknown[]>(),
+  // Nodes served to the commit/gist/release/repository/wiki fetchers.
+  contributionRepos: [] as unknown[],
+  defaultBranchHistoryNodes: [] as unknown[],
+  branchRefNodes: [] as unknown[],
+  branchHistoryByRef: new Map<string, unknown[]>(),
+  gistNodes: [] as unknown[],
+  commitCommentNodes: [] as unknown[],
+  releaseRepoNodes: [] as unknown[],
+  createdRepoNodes: [] as unknown[],
+  pushedRepoNodes: [] as unknown[],
+  restCalls: [] as string[],
+  restResponsesByPath: new Map<string, unknown>(),
 }));
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
@@ -67,6 +90,8 @@ vi.mock("@octokit/graphql", () => {
     };
   };
 
+  const noNextPage = { hasNextPage: false, endCursor: null };
+
   const impl = (query: string, variables: Record<string, unknown> = {}) => {
     calls.push({ query, variables });
 
@@ -75,11 +100,70 @@ vi.mock("@octokit/graphql", () => {
 
     if (query.includes("contributionsCollection")) {
       return Promise.resolve({
-        user: { contributionsCollection: { commitContributionsByRepository: [] } },
+        user: {
+          contributionsCollection: {
+            commitContributionsByRepository: contributionRepos.map((repository) => ({
+              repository,
+            })),
+          },
+        },
+      });
+    }
+    if (query.includes("refs(refPrefix:")) {
+      return Promise.resolve({
+        repository: { refs: { pageInfo: noNextPage, nodes: branchRefNodes } },
+      });
+    }
+    if (query.includes("ref(qualifiedName:")) {
+      const nodes = branchHistoryByRef.get(String(variables.qualifiedName)) ?? [];
+      return Promise.resolve({
+        repository: { ref: { target: { history: { pageInfo: noNextPage, nodes } } } },
       });
     }
     if (query.includes("defaultBranchRef")) {
-      return Promise.resolve({ repository: { defaultBranchRef: null } });
+      if (defaultBranchHistoryNodes.length === 0) {
+        return Promise.resolve({ repository: { defaultBranchRef: null } });
+      }
+      return Promise.resolve({
+        repository: {
+          defaultBranchRef: {
+            name: "main",
+            target: { history: { pageInfo: noNextPage, nodes: defaultBranchHistoryNodes } },
+          },
+        },
+      });
+    }
+    if (query.includes("gists(")) {
+      return Promise.resolve({
+        user: { gists: { pageInfo: noNextPage, nodes: gistNodes } },
+      });
+    }
+    if (query.includes("commitComments(")) {
+      return Promise.resolve({
+        user: { commitComments: { pageInfo: noNextPage, nodes: commitCommentNodes } },
+      });
+    }
+    // The per-repository releases page query selects repository { releases };
+    // the discovery query nests releases under user { repositories }.
+    if (query.includes("releases(first: $first")) {
+      return Promise.resolve({
+        repository: { releases: { pageInfo: noNextPage, nodes: [] } },
+      });
+    }
+    if (query.includes("releases(")) {
+      return Promise.resolve({
+        user: { repositories: { pageInfo: noNextPage, nodes: releaseRepoNodes } },
+      });
+    }
+    if (query.includes("pushedAt")) {
+      return Promise.resolve({
+        user: { repositories: { pageInfo: noNextPage, nodes: pushedRepoNodes } },
+      });
+    }
+    if (query.includes("isFork")) {
+      return Promise.resolve({
+        user: { repositories: { pageInfo: noNextPage, nodes: createdRepoNodes } },
+      });
     }
     if (query.includes("node(id:")) {
       return Promise.resolve(handleNodePage(query, variables));
@@ -99,6 +183,25 @@ vi.mock("@octokit/graphql", () => {
   return { graphql: Object.assign(impl, { defaults: () => impl }) };
 });
 
+// Stub the global fetch used by the service's REST calls (commit diffs and
+// the user events feed) so unit tests never touch the network.
+vi.stubGlobal(
+  "fetch",
+  vi.fn((url: string | URL) => {
+    const fullPath = String(url).replace("https://api.github.com", "");
+    restCalls.push(fullPath);
+    const preset =
+      restResponsesByPath.get(fullPath) ?? restResponsesByPath.get(fullPath.split("?")[0] ?? "");
+    const body = preset ?? (fullPath.startsWith("/users/") ? [] : { files: [] });
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve(body),
+    } as unknown as Response);
+  }),
+);
+
 beforeEach(() => {
   calls.length = 0;
   issueCommentSearchNodes.length = 0;
@@ -107,6 +210,17 @@ beforeEach(() => {
   reviewPagesByCursor.clear();
   searchResponsesByQuery.clear();
   failures.clear();
+  contributionRepos.length = 0;
+  defaultBranchHistoryNodes.length = 0;
+  branchRefNodes.length = 0;
+  branchHistoryByRef.clear();
+  gistNodes.length = 0;
+  commitCommentNodes.length = 0;
+  releaseRepoNodes.length = 0;
+  createdRepoNodes.length = 0;
+  pushedRepoNodes.length = 0;
+  restCalls.length = 0;
+  restResponsesByPath.clear();
 });
 
 const makeService = (params?: {
@@ -114,6 +228,8 @@ const makeService = (params?: {
   since?: Date;
   until?: Date;
   visibility?: "public" | "private" | "all";
+  branches?: "default" | "all";
+  commitDiff?: boolean;
   onWarning?: (message: string) => void;
   retry?: { maxRetries?: number; baseDelayMs?: number };
 }) =>
@@ -123,6 +239,8 @@ const makeService = (params?: {
     since: params?.since ?? new Date("2024-01-01T00:00:00Z"),
     until: params?.until ?? new Date("2024-01-15T00:00:00Z"),
     visibility: params?.visibility ?? "public",
+    branches: params?.branches,
+    commitDiff: params?.commitDiff,
     ...(params?.onWarning ? { onWarning: params.onWarning } : {}),
     retry: params?.retry ?? { baseDelayMs: 1 },
   });
@@ -277,6 +395,12 @@ const issueNode = (title: string) => ({
   repository: { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" },
 });
 
+// The fixed 2024 test range lies more than 90 days in the past, so every full
+// fetchAllEvents run also emits the wiki events-feed coverage warning; tests
+// about other warnings filter it out.
+const withoutWikiFeedWarnings = (warnings: string[]) =>
+  warnings.filter((message) => !/wiki/i.test(message));
+
 describe("search result cap handling", () => {
   it("splits the date window in half when the result count exceeds the cap", async () => {
     const warnings: string[] = [];
@@ -302,7 +426,7 @@ describe("search result cap handling", () => {
 
     const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
     expect(issueTitles).toEqual(["first-half", "second-half"]);
-    expect(warnings).toEqual([]);
+    expect(withoutWikiFeedWarnings(warnings)).toEqual([]);
   });
 
   it("keeps splitting when a half still exceeds the cap", async () => {
@@ -339,7 +463,7 @@ describe("search result cap handling", () => {
 
     const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
     expect(issueTitles).toEqual(["first-quarter", "second-quarter", "second-half"]);
-    expect(warnings).toEqual([]);
+    expect(withoutWikiFeedWarnings(warnings)).toEqual([]);
   });
 
   it("warns instead of silently truncating when a single UTC day exceeds the cap", async () => {
@@ -358,9 +482,10 @@ describe("search result cap handling", () => {
 
     const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
     expect(issueTitles).toEqual(["capped-day"]);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("1000");
-    expect(warnings[0]).toContain("author:testuser is:issue created:2024-01-05..2024-01-05");
+    const capWarnings = withoutWikiFeedWarnings(warnings);
+    expect(capWarnings).toHaveLength(1);
+    expect(capWarnings[0]).toContain("1000");
+    expect(capWarnings[0]).toContain("author:testuser is:issue created:2024-01-05..2024-01-05");
   });
 });
 
@@ -608,9 +733,10 @@ describe("transient failure handling", () => {
 
     const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
     expect(issueTitles).toEqual(["recovered"]);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("retrying");
-    expect(warnings[0]).toContain("Bad gateway");
+    const retryWarnings = withoutWikiFeedWarnings(warnings);
+    expect(retryWarnings).toHaveLength(1);
+    expect(retryWarnings[0]).toContain("retrying");
+    expect(retryWarnings[0]).toContain("Bad gateway");
   });
 
   it("gives up after the retry budget and names the failing fetcher", async () => {
@@ -733,6 +859,426 @@ describe("username override", () => {
     // No search must have been attempted after the failed lookup.
     const searchCalls = calls.filter((call) => call.query.includes("search(type:"));
     expect(searchCalls).toEqual([]);
+  });
+});
+
+describe("audit event collection", () => {
+  const repoNode = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
+
+  it("collects in-range gists and groups secret gists with private", async () => {
+    gistNodes.push(
+      {
+        name: "aaa111",
+        description: "public in range",
+        url: "https://gist.github.com/testuser/aaa111",
+        createdAt: "2024-01-05T00:00:00Z",
+        isPublic: true,
+        files: [{ name: "leak.txt", size: 10, text: "hello" }],
+      },
+      {
+        name: "bbb222",
+        description: "secret in range",
+        url: "https://gist.github.com/testuser/bbb222",
+        createdAt: "2024-01-04T00:00:00Z",
+        isPublic: false,
+        files: [],
+      },
+      {
+        name: "ccc333",
+        description: "public out of range",
+        url: "https://gist.github.com/testuser/ccc333",
+        createdAt: "2023-12-01T00:00:00Z",
+        isPublic: true,
+        files: [],
+      },
+    );
+
+    const publicEvents = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "Gist",
+    );
+    expect(publicEvents).toEqual([
+      {
+        type: "Gist",
+        createdAt: "2024-01-05T00:00:00Z",
+        description: "public in range",
+        url: "https://gist.github.com/testuser/aaa111",
+        files: [{ name: "leak.txt", size: 10, text: "hello" }],
+        repository: { owner: "testuser", name: "aaa111", visibility: "PUBLIC" },
+      },
+    ]);
+
+    const privateEvents = (await makeService({ visibility: "private" }).fetchAllEvents()).filter(
+      (event) => event.type === "Gist",
+    );
+    expect(privateEvents.map((event) => event.repository.name)).toEqual(["bbb222"]);
+  });
+
+  it("warns and skips gists when the token lacks gist access", async () => {
+    failures.set("gists(", [
+      Object.assign(new Error("Resource not accessible by personal access token"), {
+        errors: [{ type: "FORBIDDEN" }],
+      }),
+    ]);
+
+    const warnings: string[] = [];
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    expect(events.filter((event) => event.type === "Gist")).toEqual([]);
+    expect(warnings.some((message) => message.includes("Gists could not be collected"))).toBe(true);
+  });
+
+  it("collects in-range commit comments with their edit history", async () => {
+    commitCommentNodes.push(
+      {
+        body: "current text",
+        url: "https://github.com/owner/repo/commit/abc#commitcomment-1",
+        createdAt: "2024-01-05T00:00:00Z",
+        commit: { oid: "abc123" },
+        repository: repoNode,
+        userContentEdits: {
+          nodes: [{ editedAt: "2024-01-05T01:00:00Z", deletedAt: null, diff: "previous text" }],
+        },
+      },
+      {
+        body: "out of range",
+        url: "https://github.com/owner/repo/commit/def#commitcomment-2",
+        createdAt: "2023-11-01T00:00:00Z",
+        commit: null,
+        repository: repoNode,
+        userContentEdits: null,
+      },
+    );
+
+    const events = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "CommitComment",
+    );
+    expect(events).toEqual([
+      {
+        type: "CommitComment",
+        createdAt: "2024-01-05T00:00:00Z",
+        body: "current text",
+        url: "https://github.com/owner/repo/commit/abc#commitcomment-1",
+        commitOid: "abc123",
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+        editHistory: [{ editedAt: "2024-01-05T01:00:00Z", deletedAt: null, diff: "previous text" }],
+      },
+    ]);
+  });
+
+  it("collects releases authored by the user from owned repositories", async () => {
+    releaseRepoNodes.push({
+      owner: { login: "testuser" },
+      name: "repo",
+      visibility: "PUBLIC",
+      releases: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            name: "v1.1.0",
+            tagName: "v1.1.0",
+            url: "https://github.com/testuser/repo/releases/tag/v1.1.0",
+            createdAt: "2024-01-10T00:00:00Z",
+            description: "notes",
+            isPrerelease: false,
+            isDraft: false,
+            author: { login: "testuser" },
+            releaseAssets: {
+              nodes: [
+                {
+                  name: "app.tgz",
+                  downloadUrl: "https://github.com/testuser/repo/releases/download/v1.1.0/app.tgz",
+                  size: 123,
+                  contentType: "application/gzip",
+                },
+              ],
+            },
+          },
+          {
+            name: "by someone else",
+            tagName: "v1.0.1",
+            url: "https://github.com/testuser/repo/releases/tag/v1.0.1",
+            createdAt: "2024-01-09T00:00:00Z",
+            description: null,
+            isPrerelease: false,
+            isDraft: false,
+            author: { login: "someone" },
+            releaseAssets: { nodes: [] },
+          },
+        ],
+      },
+    });
+
+    const events = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "Release",
+    );
+    expect(events).toEqual([
+      {
+        type: "Release",
+        createdAt: "2024-01-10T00:00:00Z",
+        title: "v1.1.0",
+        tagName: "v1.1.0",
+        url: "https://github.com/testuser/repo/releases/tag/v1.1.0",
+        body: "notes",
+        isPrerelease: false,
+        isDraft: false,
+        assets: [
+          {
+            name: "app.tgz",
+            url: "https://github.com/testuser/repo/releases/download/v1.1.0/app.tgz",
+            size: 123,
+            contentType: "application/gzip",
+          },
+        ],
+        repository: { owner: "testuser", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+  });
+
+  it("collects repositories created within the range including their README", async () => {
+    createdRepoNodes.push(
+      {
+        owner: { login: "testuser" },
+        name: "new-repo",
+        visibility: "PUBLIC",
+        url: "https://github.com/testuser/new-repo",
+        description: "desc",
+        createdAt: "2024-01-08T00:00:00Z",
+        isFork: false,
+        object: { text: "# readme" },
+      },
+      {
+        owner: { login: "testuser" },
+        name: "old-repo",
+        visibility: "PUBLIC",
+        url: "https://github.com/testuser/old-repo",
+        description: null,
+        createdAt: "2023-01-01T00:00:00Z",
+        isFork: false,
+        object: null,
+      },
+    );
+
+    const events = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "Repository",
+    );
+    expect(events).toEqual([
+      {
+        type: "Repository",
+        createdAt: "2024-01-08T00:00:00Z",
+        url: "https://github.com/testuser/new-repo",
+        description: "desc",
+        isFork: false,
+        readme: "# readme",
+        repository: { owner: "testuser", name: "new-repo", visibility: "PUBLIC" },
+      },
+    ]);
+  });
+
+  it("collects wiki page edits from the events feed", async () => {
+    restResponsesByPath.set("/users/testuser/events", [
+      {
+        type: "GollumEvent",
+        public: true,
+        created_at: "2024-01-06T00:00:00Z",
+        repo: { name: "owner/repo" },
+        payload: {
+          pages: [
+            {
+              page_name: "Home",
+              title: "Home",
+              action: "edited",
+              html_url: "https://github.com/owner/repo/wiki/Home",
+            },
+          ],
+        },
+      },
+      {
+        type: "PushEvent",
+        public: true,
+        created_at: "2024-01-06T01:00:00Z",
+        repo: { name: "owner/repo" },
+        payload: {},
+      },
+      {
+        type: "GollumEvent",
+        public: true,
+        created_at: "2023-12-01T00:00:00Z",
+        repo: { name: "owner/repo" },
+        payload: {
+          pages: [
+            {
+              page_name: "Old",
+              title: "Old",
+              action: "created",
+              html_url: "https://github.com/owner/repo/wiki/Old",
+            },
+          ],
+        },
+      },
+    ]);
+
+    const events = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "WikiPageEdit",
+    );
+    expect(events).toEqual([
+      {
+        type: "WikiPageEdit",
+        createdAt: "2024-01-06T00:00:00Z",
+        pageTitle: "Home",
+        action: "edited",
+        url: "https://github.com/owner/repo/wiki/Home",
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+  });
+
+  it("emits each commit once with every branch it was seen on with --branches all", async () => {
+    contributionRepos.push(repoNode);
+    branchRefNodes.push({ name: "main" }, { name: "feature" });
+    const shared = {
+      oid: "aaa",
+      message: "shared commit",
+      url: "https://github.com/owner/repo/commit/aaa",
+      committedDate: "2024-01-05T00:00:00Z",
+      author: { user: { login: "testuser" } },
+    };
+    const featureOnly = {
+      oid: "bbb",
+      message: "feature-only commit",
+      url: "https://github.com/owner/repo/commit/bbb",
+      committedDate: "2024-01-06T00:00:00Z",
+      author: { user: { login: "testuser" } },
+    };
+    branchHistoryByRef.set("refs/heads/main", [shared]);
+    branchHistoryByRef.set("refs/heads/feature", [shared, featureOnly]);
+
+    const events = (await makeService({ branches: "all" }).fetchAllEvents()).filter(
+      (event) => event.type === "Commit",
+    );
+    expect(events).toEqual([
+      {
+        type: "Commit",
+        createdAt: "2024-01-05T00:00:00Z",
+        message: "shared commit",
+        url: "https://github.com/owner/repo/commit/aaa",
+        oid: "aaa",
+        branches: ["main", "feature"],
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+      {
+        type: "Commit",
+        createdAt: "2024-01-06T00:00:00Z",
+        message: "feature-only commit",
+        url: "https://github.com/owner/repo/commit/bbb",
+        oid: "bbb",
+        branches: ["feature"],
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+  });
+
+  it("attaches per-file diffs to commits with --commit-diff", async () => {
+    contributionRepos.push(repoNode);
+    defaultBranchHistoryNodes.push({
+      oid: "abc",
+      message: "commit with diff",
+      url: "https://github.com/owner/repo/commit/abc",
+      committedDate: "2024-01-05T00:00:00Z",
+      author: { user: { login: "testuser" } },
+    });
+    restResponsesByPath.set("/repos/owner/repo/commits/abc", {
+      files: [
+        {
+          filename: "src/secret.ts",
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "+const key = 'x';",
+        },
+      ],
+    });
+
+    const events = (await makeService({ commitDiff: true }).fetchAllEvents()).filter(
+      (event) => event.type === "Commit",
+    );
+    expect(events).toEqual([
+      {
+        type: "Commit",
+        createdAt: "2024-01-05T00:00:00Z",
+        message: "commit with diff",
+        url: "https://github.com/owner/repo/commit/abc",
+        oid: "abc",
+        branches: ["main"],
+        diff: [
+          {
+            filename: "src/secret.ts",
+            status: "added",
+            additions: 1,
+            deletions: 0,
+            patch: "+const key = 'x';",
+          },
+        ],
+        repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+      },
+    ]);
+    expect(restCalls).toContain("/repos/owner/repo/commits/abc");
+  });
+
+  it("omits diffs and uses the default branch without the new flags", async () => {
+    contributionRepos.push(repoNode);
+    defaultBranchHistoryNodes.push({
+      oid: "abc",
+      message: "plain commit",
+      url: "https://github.com/owner/repo/commit/abc",
+      committedDate: "2024-01-05T00:00:00Z",
+      author: { user: { login: "testuser" } },
+    });
+
+    const events = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "Commit",
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).not.toHaveProperty("diff");
+    expect(events[0]).toMatchObject({ branches: ["main"] });
+    expect(restCalls.filter((path) => path.startsWith("/repos/"))).toEqual([]);
+  });
+
+  it("attaches edit history to issue comments that were edited", async () => {
+    issueCommentSearchNodes.push({
+      id: "ISSUE_NODE_ID",
+      title: "Issue",
+      url: "https://github.com/owner/repo/issues/1",
+      createdAt: "2024-01-02T00:00:00Z",
+      repository: { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" },
+      comments: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            body: "edited comment",
+            url: "https://github.com/owner/repo/issues/1#issuecomment-1",
+            createdAt: "2024-01-05T12:00:00Z",
+            author: { login: "testuser" },
+            userContentEdits: {
+              nodes: [
+                { editedAt: "2024-01-05T13:00:00Z", deletedAt: null, diff: "original wording" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const events = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "IssueComment",
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      editHistory: [
+        { editedAt: "2024-01-05T13:00:00Z", deletedAt: null, diff: "original wording" },
+      ],
+    });
   });
 });
 

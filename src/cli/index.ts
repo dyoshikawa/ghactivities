@@ -42,6 +42,8 @@ async function main(): Promise<void> {
       since: options.since,
       until: options.until,
       visibility: options.visibility,
+      branches: options.branches,
+      commitDiff: options.commitDiff,
       onWarning: (message) => {
         p.log.warn(message);
       },

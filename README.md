@@ -1,6 +1,6 @@
 # ghactivities
 
-A CLI tool that collects your GitHub activity — issues, issue comments, discussions, discussion comments, pull requests, pull request comments, pull request review comments, and commits — and writes them to a JSON file.
+A CLI tool that collects your GitHub activity — issues, comments, discussions, pull requests, reviews, commits, commit comments, gists, releases, repositories, and wiki edits — and writes them to a JSON file.
 
 ## Features
 
@@ -13,7 +13,14 @@ Fetches the following events authored by you — or by any user given with `--us
 - **PullRequest** — pull requests you opened
 - **PullRequestComment** — conversation comments you left on pull requests
 - **PullRequestReviewComment** — review feedback you left on pull requests (review summary bodies and inline review comments on the diff)
-- **Commit** — commits you authored (on each repository's default branch)
+- **Commit** — commits you authored (on each repository's default branch, or on every branch with `--branches all`; add per-file diffs with `--commit-diff`)
+- **CommitComment** — comments you left directly on commits
+- **Gist** — gists you created, including file contents (secret gists count as private)
+- **Release** — releases you published in your own repositories, including release notes and asset metadata
+- **Repository** — repositories you created, including their description and README
+- **WikiPageEdit** — wiki pages you created or edited (from the GitHub events feed; see [Notes](#notes))
+
+Comment events additionally carry an `editHistory` field with the prior revisions (up to the 5 most recent edits) when a comment has been edited — useful for auditing content that was posted and then reworded or removed.
 
 It can also **scan** the collected JSON with an LLM to produce a Markdown summary report — see [Scanning activity with an LLM](#scanning-activity-with-an-llm).
 
@@ -52,6 +59,8 @@ To include private repositories (`--visibility private` or `--visibility all`), 
 | `--since`           | Start of the range, in ISO 8601 format. Must not be later than `--until`.                                                                                                                  | 2 weeks ago                              |
 | `--until`           | End of the range, in ISO 8601 format.                                                                                                                                                      | now                                      |
 | `--visibility`      | Repository visibility: `public`, `private`, or `all`.                                                                                                                                      | `public`                                 |
+| `--branches`        | Commit collection scope: `default` (each repository's default branch) or `all` (every branch, deduplicated; each commit lists the branches it was seen on).                                | `default`                                |
+| `--commit-diff`     | Attach per-file diffs (`diff` field) to Commit events. Costs one extra API request per commit.                                                                                             | off                                      |
 | `--max-length-size` | Maximum output file size (e.g. `1B`, `2K`, `2M`, `1G`). Larger output is split across multiple files.                                                                                      | `1M`                                     |
 | `--max-tokens`      | Maximum number of tokens per output file (counted with `js-tiktoken`'s `cl100k_base` encoding). Output is split when a file would exceed this. Applied in addition to `--max-length-size`. | (disabled)                               |
 | `--order`           | Event order by date: `asc` or `desc`.                                                                                                                                                      | `asc`                                    |
@@ -97,6 +106,9 @@ npx ghactivities
 
 # Collect another user's public activity
 npx ghactivities --user octocat
+
+# Audit-oriented collection: every branch, with commit diffs
+npx ghactivities --branches all --commit-diff
 
 # Collect a specific range, including private repositories
 npx ghactivities \
@@ -166,7 +178,12 @@ For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vert
 
 ## Notes
 
-- **Commits** are collected from each repository's **default branch** only; commits on other branches are not included.
+- **Commits** are collected from each repository's **default branch** by default. With `--branches all`, every branch is scanned and each commit is emitted once with a `branches` list of the branches it was found on. Repository discovery is based on GitHub's contribution data (default-branch commits) plus, with `--branches all`, your own repositories pushed within the range — branches of repositories you do not own and never committed to on the default branch can still be missed.
+- **Gists** need gist read access on the token (the `gist` scope on classic tokens, or the Gists permission on fine-grained tokens). Without it, gists are skipped with a warning instead of failing the run.
+- **Releases** are discovered by walking the user's **own** repositories; releases published in repositories owned by someone else are not collected.
+- **Repository** events cover repositories **created** within the range; a repository that was switched from private to public is not detected as an event (GitHub exposes no such timestamp).
+- **WikiPageEdit** events come from the GitHub events feed, which only covers the most recent **90 days** and at most **300 events** per user; a warning is printed when the requested range cannot be fully covered.
+- **editHistory** on comment events contains at most the 5 most recent prior revisions of an edited comment.
 - With `--user`, events are collected for that user, but only from repositories the **token** can see: another user's activity in private repositories appears (with `--visibility private` or `all`) only when the token also has read access to those repositories.
 - Repositories with `INTERNAL` visibility (organization-internal repositories on GitHub Enterprise) are treated as private: they are included with `--visibility private` and `--visibility all`, and excluded with `--visibility public`.
 - Event types are fetched one at a time (not concurrently) to stay within GitHub's secondary rate limits. Transient API failures — rate limits and gateway errors — are retried up to 3 times, honoring the server-suggested wait when provided and falling back to exponential backoff. If fetching still fails, the error names the event type that was being fetched.

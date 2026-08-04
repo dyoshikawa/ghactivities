@@ -58,10 +58,22 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["--user", `a${"-b".repeat(20)}`])).toThrow(/--user/);
   });
 
+  it("parses --branches and --commit-diff", () => {
+    const result = parseCliArgs(["--branches", "all", "--commit-diff"]);
+    expect(result.branches).toBe("all");
+    expect(result.commitDiff).toBe(true);
+  });
+
+  it("throws on an invalid --branches value", () => {
+    expect(() => parseCliArgs(["--branches", "sideways"])).toThrow();
+  });
+
   it("uses defaults when no options provided", () => {
     const result = parseCliArgs([]);
     expect(result.output).toBe("./ghactivities.json");
     expect(result.visibility).toBe("public");
+    expect(result.branches).toBe("default");
+    expect(result.commitDiff).toBe(false);
     expect(result.maxLengthSize).toBe(1024 * 1024);
     expect(result.maxTokens).toBeUndefined();
     expect(result.order).toBe("asc");

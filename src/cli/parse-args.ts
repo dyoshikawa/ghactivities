@@ -1,7 +1,7 @@
 import { parseArgs as nodeParseArgs } from "node:util";
 import { z } from "zod/mini";
 
-import type { CliOptions, Order, Visibility } from "../types/cli.js";
+import type { Branches, CliOptions, Order, Visibility } from "../types/cli.js";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
@@ -31,6 +31,8 @@ const ArgsSchema = z
       }),
     ),
     visibility: z.enum(["public", "private", "all"]),
+    branches: z.enum(["default", "all"]),
+    commitDiff: z.boolean(),
     maxLengthSize: z.string().check(
       z.refine(
         (v) => {
@@ -87,6 +89,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
       since: { type: "string", default: getDefaultSince() },
       until: { type: "string", default: new Date().toISOString() },
       visibility: { type: "string", default: "public" },
+      branches: { type: "string", default: "default" },
+      "commit-diff": { type: "boolean", default: false },
       "max-length-size": { type: "string", default: "1M" },
       "max-tokens": { type: "string" },
       order: { type: "string", default: "asc" },
@@ -120,6 +124,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
     since: values.since,
     until: values.until,
     visibility: values.visibility,
+    branches: values.branches,
+    commitDiff: values["commit-diff"],
     maxLengthSize: values["max-length-size"],
     maxTokens: values["max-tokens"],
     order: values.order,
@@ -143,6 +149,8 @@ export function parseCliArgs(argv: string[]): CliOptions {
     since: new Date(parsed.since),
     until: new Date(parsed.until),
     visibility: parsed.visibility as Visibility,
+    branches: parsed.branches as Branches,
+    commitDiff: parsed.commitDiff,
     maxLengthSize: parseSize(parsed.maxLengthSize),
     maxTokens: parsed.maxTokens === undefined ? undefined : Number(parsed.maxTokens.trim()),
     order: parsed.order as Order,
@@ -162,6 +170,8 @@ Options:
   --since             Start date in ISO8601 format; must not be after --until (default: 2 weeks ago)
   --until             End date in ISO8601 format (default: now)
   --visibility        Repository visibility: public, private, all (default: public)
+  --branches          Commit collection scope: default (default branch only), all (every branch) (default: default)
+  --commit-diff       Attach per-file diffs to Commit events (one extra API call per commit)
   --max-length-size   Max output file size: e.g., 1B, 2K, 2M (default: 1M)
   --max-tokens        Max tokens per output file (js-tiktoken, cl100k_base); splits when exceeded
   --order             Event order: asc, desc (default: asc)
