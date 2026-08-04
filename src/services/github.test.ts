@@ -81,17 +81,17 @@ vi.mock("@octokit/graphql", () => {
     if (query.includes("defaultBranchRef")) {
       return Promise.resolve({ repository: { defaultBranchRef: null } });
     }
-    // Must come before the viewer-id fallback: these query texts contain "id".
     if (query.includes("node(id:")) {
       return Promise.resolve(handleNodePage(query, variables));
     }
     if (query.includes("search(type:")) {
       return Promise.resolve(handleSearch(variables));
     }
-    // The only remaining queries are the two viewer lookups; the id variant is
-    // the one that also selects the `id` field.
-    if (query.includes("id")) {
-      return Promise.resolve({ viewer: { id: "VIEWER_ID", login: "testuser" } });
+    // User id lookup (commit author filter and the --user existence check).
+    // The contributionsCollection query also selects user(login:) but is
+    // already handled above.
+    if (query.includes("user(login:")) {
+      return Promise.resolve({ user: { id: "USER_ID" } });
     }
     return Promise.resolve({ viewer: { login: "testuser" } });
   };
@@ -110,6 +110,7 @@ beforeEach(() => {
 });
 
 const makeService = (params?: {
+  username?: string;
   since?: Date;
   until?: Date;
   visibility?: "public" | "private" | "all";
@@ -118,6 +119,7 @@ const makeService = (params?: {
 }) =>
   new GitHubService({
     token: "test-token",
+    username: params?.username,
     since: params?.since ?? new Date("2024-01-01T00:00:00Z"),
     until: params?.until ?? new Date("2024-01-15T00:00:00Z"),
     visibility: params?.visibility ?? "public",
@@ -670,6 +672,60 @@ describe("computeRetryDelayMs", () => {
     const error = { headers: { "retry-after": "soon", "x-ratelimit-reset": "-5" } };
     expect(computeRetryDelayMs({ error, attempt: 0, baseDelayMs: 1000 })).toBe(1000);
     expect(computeRetryDelayMs({ error, attempt: 2, baseDelayMs: 1000 })).toBe(4000);
+  });
+});
+
+describe("username override", () => {
+  it("resolves the viewer login when no username is given", async () => {
+    await makeService().fetchAllEvents();
+
+    const viewerCalls = calls.filter((call) => call.query.includes("viewer"));
+    expect(viewerCalls.length).toBeGreaterThan(0);
+
+    const searchQueries = calls
+      .map((call) => call.variables.searchQuery)
+      .filter((value): value is string => typeof value === "string");
+    expect(searchQueries.some((q) => q.includes("author:testuser"))).toBe(true);
+  });
+
+  it("searches as the given username and never queries the viewer", async () => {
+    await makeService({ username: "octocat" }).fetchAllEvents();
+
+    const viewerCalls = calls.filter((call) => call.query.includes("viewer"));
+    expect(viewerCalls).toEqual([]);
+
+    const searchQueries = calls
+      .map((call) => call.variables.searchQuery)
+      .filter((value): value is string => typeof value === "string");
+    expect(searchQueries.some((q) => q.includes("author:octocat"))).toBe(true);
+    expect(searchQueries.some((q) => q.includes("commenter:octocat"))).toBe(true);
+    expect(searchQueries.some((q) => q.includes("reviewed-by:octocat"))).toBe(true);
+    expect(searchQueries.some((q) => q.includes("testuser"))).toBe(false);
+
+    // The commit contributions lookup must target the given user too.
+    const contributionCalls = calls.filter((call) =>
+      call.query.includes("contributionsCollection"),
+    );
+    expect(contributionCalls.length).toBeGreaterThan(0);
+    for (const call of contributionCalls) {
+      expect(call.variables.login).toBe("octocat");
+    }
+  });
+
+  it("fails fast with a clear error when the given user does not exist", async () => {
+    // `($login: String!) {` (immediately closed) only appears in the user-id
+    // query; the contributions query declares more variables.
+    failures.set("($login: String!) {", [
+      new Error("Could not resolve to a User with the login of 'ghost'."),
+    ]);
+
+    await expect(makeService({ username: "ghost" }).fetchAllEvents()).rejects.toThrow(
+      'Failed to fetch user "ghost"',
+    );
+
+    // No search must have been attempted after the failed lookup.
+    const searchCalls = calls.filter((call) => call.query.includes("search(type:"));
+    expect(searchCalls).toEqual([]);
   });
 });
 

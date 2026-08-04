@@ -5,6 +5,8 @@ export type Order = "asc" | "desc";
 
 export interface CliOptions {
   githubToken: string;
+  /** When set (via --user), activity of this user is collected instead of the authenticated user's. */
+  user?: string | undefined;
   output: string;
   since: Date;
   until: Date;

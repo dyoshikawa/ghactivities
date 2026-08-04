@@ -188,3 +188,9 @@ export interface ViewerResponse {
     login: string;
   };
 }
+
+export interface UserIdResponse {
+  user: {
+    id: string;
+  } | null;
+}

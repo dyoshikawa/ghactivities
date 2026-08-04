@@ -32,6 +32,24 @@ describe("parseCliArgs", () => {
     expect(result.order).toBe("desc");
   });
 
+  it("parses --user", () => {
+    expect(parseCliArgs(["--user", "octocat"]).user).toBe("octocat");
+    expect(parseCliArgs(["--user", "my-name-1"]).user).toBe("my-name-1");
+  });
+
+  it("leaves user undefined unless --user is passed", () => {
+    expect(parseCliArgs([]).user).toBeUndefined();
+  });
+
+  it("throws on an invalid --user value", () => {
+    expect(() => parseCliArgs(["--user", ""])).toThrow(/--user/);
+    expect(() => parseCliArgs(["--user", "-leading-hyphen"])).toThrow(/--user/);
+    expect(() => parseCliArgs(["--user", "trailing-hyphen-"])).toThrow(/--user/);
+    expect(() => parseCliArgs(["--user", "double--hyphen"])).toThrow(/--user/);
+    expect(() => parseCliArgs(["--user", "has space"])).toThrow(/--user/);
+    expect(() => parseCliArgs(["--user", "a".repeat(40)])).toThrow(/--user/);
+  });
+
   it("uses defaults when no options provided", () => {
     const result = parseCliArgs([]);
     expect(result.output).toBe("./ghactivities.json");

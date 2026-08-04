@@ -28,6 +28,12 @@ describe("E2E: CLI option validation", () => {
     });
   });
 
+  it("rejects a malformed --user value", async () => {
+    await expect(runCli(["--user", "-not-a-login-"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/--user/),
+    });
+  });
+
   it("rejects a malformed --max-length-size value", async () => {
     await expect(runCli(["--max-length-size", "abc"])).rejects.toMatchObject({
       stdout: expect.stringMatching(/max-length-size|size/i),
