@@ -32,6 +32,7 @@ import {
   toUtcDayString,
 } from "../utils/date-range.js";
 import { formatError } from "../utils/error.js";
+import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
 import {
   COMMIT_HISTORY_QUERY,
   CONTRIBUTIONS_COLLECTION_QUERY,
@@ -125,6 +126,9 @@ export function computeRetryDelayMs(params: {
 export class GitHubService {
   private readonly graphqlWithAuth: typeof graphql;
   private readonly username: string | undefined;
+  // Caches the id lookup, which runs both as the up-front --user existence
+  // check and for the commit history author filter.
+  private userIdCache: { login: string; id: string } | undefined;
   private readonly since: Date;
   private readonly until: Date;
   private readonly visibility: Visibility;
@@ -155,6 +159,12 @@ export class GitHubService {
       }
     } else {
       username = this.username;
+      // Defense in depth: the CLI already validates --user, but the username
+      // is interpolated into search query strings, so a caller bypassing the
+      // CLI must not be able to inject extra search qualifiers.
+      if (!GITHUB_LOGIN_PATTERN.test(username)) {
+        throw new Error(`Invalid GitHub username: "${username}"`);
+      }
       // Resolving the id up front makes a nonexistent --user fail fast with a
       // clear error instead of six empty searches followed by a commit failure.
       try {
@@ -222,17 +232,13 @@ export class GitHubService {
     return response.viewer.login;
   }
 
-  // Cached: the id is resolved once per run but needed both for the up-front
-  // --user existence check and for the commit history author filter.
-  private userIdCache: string | undefined;
-
   private async getUserId(login: string): Promise<string> {
-    if (this.userIdCache !== undefined) return this.userIdCache;
+    if (this.userIdCache?.login === login) return this.userIdCache.id;
     const response = await this.execute<UserIdResponse>(USER_ID_QUERY, { login });
     if (!response.user) {
       throw new Error(`GitHub user "${login}" was not found`);
     }
-    this.userIdCache = response.user.id;
+    this.userIdCache = { login, id: response.user.id };
     return response.user.id;
   }
 

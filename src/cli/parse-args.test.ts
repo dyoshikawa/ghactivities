@@ -35,6 +35,9 @@ describe("parseCliArgs", () => {
   it("parses --user", () => {
     expect(parseCliArgs(["--user", "octocat"]).user).toBe("octocat");
     expect(parseCliArgs(["--user", "my-name-1"]).user).toBe("my-name-1");
+    // 39 characters, hyphens included, is the longest valid login.
+    expect(parseCliArgs(["--user", "a".repeat(39)]).user).toBe("a".repeat(39));
+    expect(parseCliArgs(["--user", "a-b".repeat(13)]).user).toBe("a-b".repeat(13));
   });
 
   it("leaves user undefined unless --user is passed", () => {
@@ -43,11 +46,16 @@ describe("parseCliArgs", () => {
 
   it("throws on an invalid --user value", () => {
     expect(() => parseCliArgs(["--user", ""])).toThrow(/--user/);
-    expect(() => parseCliArgs(["--user", "-leading-hyphen"])).toThrow(/--user/);
+    // The `--user=` form is required here: a space-separated value starting
+    // with a hyphen is rejected by parseArgs itself as an ambiguous option
+    // and would never reach the schema validation.
+    expect(() => parseCliArgs(["--user=-leading-hyphen"])).toThrow(/--user/);
     expect(() => parseCliArgs(["--user", "trailing-hyphen-"])).toThrow(/--user/);
     expect(() => parseCliArgs(["--user", "double--hyphen"])).toThrow(/--user/);
     expect(() => parseCliArgs(["--user", "has space"])).toThrow(/--user/);
     expect(() => parseCliArgs(["--user", "a".repeat(40)])).toThrow(/--user/);
+    // Hyphens count toward the 39-character cap.
+    expect(() => parseCliArgs(["--user", `a${"-b".repeat(20)}`])).toThrow(/--user/);
   });
 
   it("uses defaults when no options provided", () => {

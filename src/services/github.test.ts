@@ -712,6 +712,13 @@ describe("username override", () => {
     }
   });
 
+  it("rejects a username that could inject extra search qualifiers", async () => {
+    await expect(makeService({ username: "x is:public" }).fetchAllEvents()).rejects.toThrow(
+      "Invalid GitHub username",
+    );
+    expect(calls).toEqual([]);
+  });
+
   it("fails fast with a clear error when the given user does not exist", async () => {
     // `($login: String!) {` (immediately closed) only appears in the user-id
     // query; the contributions query declares more variables.

@@ -4,12 +4,9 @@ import { z } from "zod/mini";
 import type { CliOptions, Order, Visibility } from "../types/cli.js";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
 import { parseSize } from "../utils/parse-size.js";
 import { resolveScanConfig } from "./parse-scan-args.js";
-
-// GitHub logins are 1-39 alphanumeric characters or hyphens, and a hyphen
-// cannot start, end, or repeat.
-const GITHUB_LOGIN_PATTERN = /^[a-zA-Z0-9](?:-?[a-zA-Z0-9]){0,38}$/;
 
 const ArgsSchema = z
   .object({
@@ -18,7 +15,7 @@ const ArgsSchema = z
       z.string().check(
         z.refine((v) => GITHUB_LOGIN_PATTERN.test(v), {
           message:
-            "Invalid GitHub username for --user. Expected 1-39 alphanumeric characters or hyphens, not starting or ending with a hyphen.",
+            "Invalid GitHub username for --user. Expected at most 39 alphanumeric characters or hyphens; a hyphen cannot start, end, or repeat.",
         }),
       ),
     ),
