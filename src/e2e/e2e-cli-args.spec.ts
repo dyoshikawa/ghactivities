@@ -14,6 +14,12 @@ describe("E2E: CLI option validation", () => {
     });
   });
 
+  it("rejects an invalid --branches value", async () => {
+    await expect(runCli(["--branches", "sideways"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/branches/i),
+    });
+  });
+
   it("rejects an invalid --visibility value", async () => {
     await expect(runCli(["--visibility", "secret"])).rejects.toMatchObject({
       stdout: expect.stringMatching(/visibility/i),

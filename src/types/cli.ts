@@ -2,6 +2,7 @@ import type { ScanConfig } from "./scan.js";
 
 export type Visibility = "public" | "private" | "all";
 export type Order = "asc" | "desc";
+export type Branches = "default" | "all";
 
 export interface CliOptions {
   githubToken: string;
@@ -11,6 +12,10 @@ export interface CliOptions {
   since: Date;
   until: Date;
   visibility: Visibility;
+  /** Collect commits from the default branch only, or from every branch. */
+  branches: Branches;
+  /** When true, attach per-file diffs to Commit events. */
+  commitDiff: boolean;
   maxLengthSize: number;
   maxTokens?: number | undefined;
   order: Order;
