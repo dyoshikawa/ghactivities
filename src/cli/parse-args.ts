@@ -4,12 +4,21 @@ import { z } from "zod/mini";
 import type { CliOptions, Order, Visibility } from "../types/cli.js";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
 import { parseSize } from "../utils/parse-size.js";
 import { resolveScanConfig } from "./parse-scan-args.js";
 
 const ArgsSchema = z
   .object({
     githubToken: z.optional(z.string()),
+    user: z.optional(
+      z.string().check(
+        z.refine((v) => GITHUB_LOGIN_PATTERN.test(v), {
+          message:
+            "Invalid GitHub username for --user. Expected at most 39 alphanumeric characters or hyphens; a hyphen cannot start, end, or repeat.",
+        }),
+      ),
+    ),
     output: z.string(),
     since: z.string().check(
       z.refine((v) => !Number.isNaN(Date.parse(v)), {
@@ -73,6 +82,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     args: argv,
     options: {
       "github-token": { type: "string" },
+      user: { type: "string" },
       output: { type: "string", default: "./ghactivities.json" },
       since: { type: "string", default: getDefaultSince() },
       until: { type: "string", default: new Date().toISOString() },
@@ -105,6 +115,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   const parsed = ArgsSchema.parse({
     githubToken: values["github-token"],
+    user: values.user,
     output: values.output,
     since: values.since,
     until: values.until,
@@ -127,6 +138,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   return {
     githubToken: parsed.githubToken ?? "",
+    user: parsed.user,
     output: parsed.output,
     since: new Date(parsed.since),
     until: new Date(parsed.until),
@@ -145,6 +157,7 @@ Usage: ghactivities [options]
 
 Options:
   --github-token      GitHub access token (env: GITHUB_TOKEN or "gh auth token")
+  --user              GitHub username to collect activity for (default: the authenticated user)
   --output            Output file path (default: ./ghactivities.json)
   --since             Start date in ISO8601 format; must not be after --until (default: 2 weeks ago)
   --until             End date in ISO8601 format (default: now)

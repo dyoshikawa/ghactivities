@@ -20,6 +20,7 @@ import type {
   ReviewsConnection,
   ReviewsPageResponse,
   SearchResponse,
+  UserIdResponse,
   ViewerResponse,
 } from "../types/github-api.js";
 import type { DateRange } from "../utils/date-range.js";
@@ -31,6 +32,7 @@ import {
   toUtcDayString,
 } from "../utils/date-range.js";
 import { formatError } from "../utils/error.js";
+import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
 import {
   COMMIT_HISTORY_QUERY,
   CONTRIBUTIONS_COLLECTION_QUERY,
@@ -46,12 +48,14 @@ import {
   PULL_REQUEST_SEARCH_QUERY,
   REVIEW_COMMENTS_PAGE_QUERY,
   REVIEWS_PAGE_QUERY,
-  VIEWER_ID_QUERY,
+  USER_ID_QUERY,
   VIEWER_QUERY,
 } from "./github-queries.js";
 
 interface GitHubServiceParams {
   token: string;
+  /** Collect this user's activity instead of the authenticated user's. */
+  username?: string | undefined;
   since: Date;
   until: Date;
   visibility: Visibility;
@@ -121,6 +125,10 @@ export function computeRetryDelayMs(params: {
 
 export class GitHubService {
   private readonly graphqlWithAuth: typeof graphql;
+  private readonly username: string | undefined;
+  // Caches the id lookup, which runs both as the up-front --user existence
+  // check and for the commit history author filter.
+  private userIdCache: { login: string; id: string } | undefined;
   private readonly since: Date;
   private readonly until: Date;
   private readonly visibility: Visibility;
@@ -132,6 +140,7 @@ export class GitHubService {
     this.graphqlWithAuth = graphql.defaults({
       headers: { authorization: `token ${params.token}` },
     });
+    this.username = params.username;
     this.since = params.since;
     this.until = params.until;
     this.visibility = params.visibility;
@@ -142,10 +151,29 @@ export class GitHubService {
 
   async fetchAllEvents(): Promise<GitHubEvent[]> {
     let username: string;
-    try {
-      username = await this.getViewerLogin();
-    } catch (error) {
-      throw new Error(`Failed to fetch viewer login: ${formatError(error)}`, { cause: error });
+    if (this.username === undefined) {
+      try {
+        username = await this.getViewerLogin();
+      } catch (error) {
+        throw new Error(`Failed to fetch viewer login: ${formatError(error)}`, { cause: error });
+      }
+    } else {
+      username = this.username;
+      // Defense in depth: the CLI already validates --user, but the username
+      // is interpolated into search query strings, so a caller bypassing the
+      // CLI must not be able to inject extra search qualifiers.
+      if (!GITHUB_LOGIN_PATTERN.test(username)) {
+        throw new Error(`Invalid GitHub username: "${username}"`);
+      }
+      // Resolving the id up front makes a nonexistent --user fail fast with a
+      // clear error instead of six empty searches followed by a commit failure.
+      try {
+        await this.getUserId(username);
+      } catch (error) {
+        throw new Error(`Failed to fetch user "${username}": ${formatError(error)}`, {
+          cause: error,
+        });
+      }
     }
 
     // Fetchers run one at a time: GitHub's secondary rate-limit guidance is to
@@ -204,11 +232,14 @@ export class GitHubService {
     return response.viewer.login;
   }
 
-  private async getViewerId(): Promise<string> {
-    const response = await this.execute<{
-      viewer: { id: string; login: string };
-    }>(VIEWER_ID_QUERY);
-    return response.viewer.id;
+  private async getUserId(login: string): Promise<string> {
+    if (this.userIdCache?.login === login) return this.userIdCache.id;
+    const response = await this.execute<UserIdResponse>(USER_ID_QUERY, { login });
+    if (!response.user) {
+      throw new Error(`GitHub user "${login}" was not found`);
+    }
+    this.userIdCache = { login, id: response.user.id };
+    return response.user.id;
   }
 
   // Search qualifiers match the parent issue/PR/discussion, not its comments.
@@ -632,7 +663,7 @@ export class GitHubService {
 
   private async fetchCommits(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    const viewerId = await this.getViewerId();
+    const authorId = await this.getUserId(username);
     const periods = splitDateRangeIntoYearPeriods({
       since: this.since,
       until: this.until,
@@ -673,7 +704,7 @@ export class GitHubService {
             until: this.until.toISOString(),
             first: 100,
             after: cursor,
-            authorId: viewerId,
+            authorId,
           },
         );
 

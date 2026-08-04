@@ -219,6 +219,7 @@
     "aquasecurity",
     "misconfig",
     "worktree",
-    "worktrees"
+    "worktrees",
+    "octocat"
   ]
 }

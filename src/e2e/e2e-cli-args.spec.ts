@@ -28,6 +28,14 @@ describe("E2E: CLI option validation", () => {
     });
   });
 
+  it("rejects a malformed --user value", async () => {
+    // The value must not start with a hyphen: parseArgs would reject it as an
+    // ambiguous option before the schema validation this test covers is run.
+    await expect(runCli(["--user", "not--a--login"])).rejects.toMatchObject({
+      stdout: expect.stringMatching(/--user/),
+    });
+  });
+
   it("rejects a malformed --max-length-size value", async () => {
     await expect(runCli(["--max-length-size", "abc"])).rejects.toMatchObject({
       stdout: expect.stringMatching(/max-length-size|size/i),

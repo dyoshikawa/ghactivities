@@ -38,6 +38,7 @@ async function main(): Promise<void> {
 
     const service = new GitHubService({
       token,
+      username: options.user,
       since: options.since,
       until: options.until,
       visibility: options.visibility,

@@ -4,7 +4,7 @@ A CLI tool that collects your GitHub activity — issues, issue comments, discus
 
 ## Features
 
-Fetches the following events authored by you within a date range and outputs them as JSON:
+Fetches the following events authored by you — or by any user given with `--user` — within a date range and outputs them as JSON:
 
 - **Issue** — issues you opened
 - **IssueComment** — comments you left on issues
@@ -47,6 +47,7 @@ To include private repositories (`--visibility private` or `--visibility all`), 
 | Option              | Description                                                                                                                                                                                | Default                                  |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
 | `--github-token`    | GitHub access token.                                                                                                                                                                       | `GITHUB_TOKEN` env, then `gh auth token` |
+| `--user`            | GitHub username whose activity is collected instead of the authenticated user's. A token is still required for API access.                                                                 | the authenticated user                   |
 | `--output`          | Output file path.                                                                                                                                                                          | `./ghactivities.json`                    |
 | `--since`           | Start of the range, in ISO 8601 format. Must not be later than `--until`.                                                                                                                  | 2 weeks ago                              |
 | `--until`           | End of the range, in ISO 8601 format.                                                                                                                                                      | now                                      |
@@ -93,6 +94,9 @@ When both `--max-length-size` and `--max-tokens` are given, a file is split as s
 ```bash
 # Collect the last two weeks of public activity into ./ghactivities.json
 npx ghactivities
+
+# Collect another user's public activity
+npx ghactivities --user octocat
 
 # Collect a specific range, including private repositories
 npx ghactivities \
@@ -163,6 +167,7 @@ For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vert
 ## Notes
 
 - **Commits** are collected from each repository's **default branch** only; commits on other branches are not included.
+- With `--user`, events are collected for that user, but only from repositories the **token** can see: another user's activity in private repositories appears (with `--visibility private` or `all`) only when the token also has read access to those repositories.
 - Repositories with `INTERNAL` visibility (organization-internal repositories on GitHub Enterprise) are treated as private: they are included with `--visibility private` and `--visibility all`, and excluded with `--visibility public`.
 - Event types are fetched one at a time (not concurrently) to stay within GitHub's secondary rate limits. Transient API failures — rate limits and gateway errors — are retried up to 3 times, honoring the server-suggested wait when provided and falling back to exponential backoff. If fetching still fails, the error names the event type that was being fetched.
 - GitHub's Search API returns at most 1,000 results per query. When a query would exceed that cap, the date range is automatically split into smaller windows and searched again. If a single UTC day still exceeds the cap, the excess items are skipped and a warning is printed.

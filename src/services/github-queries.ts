@@ -363,11 +363,10 @@ export const COMMIT_HISTORY_QUERY = `
   }
 `;
 
-export const VIEWER_ID_QUERY = `
-  query {
-    viewer {
+export const USER_ID_QUERY = `
+  query ($login: String!) {
+    user(login: $login) {
       id
-      login
     }
   }
 `;
