@@ -99,6 +99,10 @@ const EVENTS_FEED_MAX_PAGES = 3;
 const EVENTS_FEED_PAGE_SIZE = 100;
 const EVENTS_FEED_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
+// With --branches all, a repository with this many branches triggers a
+// heads-up warning about scan time and rate-limit consumption.
+const MANY_BRANCHES_WARNING_THRESHOLD = 200;
+
 // GitHub's Search API never returns more than 1,000 results per query.
 const SEARCH_RESULT_CAP = 1000;
 
@@ -316,8 +320,19 @@ export class GitHubService {
         },
       });
       if (!response.ok) {
+        // The body's message is part of the error so isRetryableError can
+        // recognize secondary rate limits (403 + "rate limit" message) the
+        // same way it does for GraphQL errors; reading it also releases the
+        // connection.
+        const bodyText = await response.text().catch(() => "");
+        let bodyMessage = "";
+        try {
+          bodyMessage = String((JSON.parse(bodyText) as { message?: string }).message ?? "");
+        } catch {
+          bodyMessage = "";
+        }
         const error = new Error(
-          `GitHub REST API request to ${path} failed with status ${String(response.status)}`,
+          `GitHub REST API request to ${path} failed with status ${String(response.status)}${bodyMessage ? `: ${bodyMessage}` : ""}`,
         );
         Object.assign(error, {
           status: response.status,
@@ -821,7 +836,11 @@ export class GitHubService {
         if (!connection) break;
         let reachedOlder = false;
         for (const node of connection.nodes) {
-          if (node.pushedAt === null || new Date(node.pushedAt) < this.since) {
+          // The ordering of never-pushed repositories under PUSHED_AT DESC is
+          // not specified, so a null pushedAt is skipped rather than treated
+          // as an early-stop signal.
+          if (node.pushedAt === null) continue;
+          if (new Date(node.pushedAt) < this.since) {
             reachedOlder = true;
             break;
           }
@@ -914,21 +933,34 @@ export class GitHubService {
     return branches;
   }
 
+  // The commit endpoint returns at most 300 files per page; larger commits
+  // must be paged so no changed file is silently dropped from the audit.
+  private static readonly COMMIT_DIFF_FILES_PER_PAGE = 300;
+
   private async fetchCommitDiff(params: {
     owner: string;
     name: string;
     oid: string;
   }): Promise<CommitDiffFile[]> {
-    const detail = await this.executeRest<RestCommitDetail>(
-      `/repos/${params.owner}/${params.name}/commits/${params.oid}`,
-    );
-    return (detail.files ?? []).map((file) => ({
-      filename: file.filename,
-      status: file.status,
-      additions: file.additions,
-      deletions: file.deletions,
-      patch: file.patch ?? null,
-    }));
+    const basePath = `/repos/${encodeURIComponent(params.owner)}/${encodeURIComponent(params.name)}/commits/${encodeURIComponent(params.oid)}`;
+    const files: CommitDiffFile[] = [];
+
+    for (let page = 1; ; page++) {
+      const detail = await this.executeRest<RestCommitDetail>(`${basePath}?page=${String(page)}`);
+      const pageFiles = detail.files ?? [];
+      files.push(
+        ...pageFiles.map((file) => ({
+          filename: file.filename,
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+          patch: file.patch ?? null,
+        })),
+      );
+      if (pageFiles.length < GitHubService.COMMIT_DIFF_FILES_PER_PAGE) break;
+    }
+
+    return files;
   }
 
   private async fetchCommits(username: string): Promise<GitHubEvent[]> {
@@ -944,6 +976,11 @@ export class GitHubService {
       const commitsByOid = new Map<string, { node: CommitHistoryNode; branches: string[] }>();
       const branchNames =
         this.branches === "all" ? await this.listBranches({ owner, name }) : [null];
+      if (branchNames.length > MANY_BRANCHES_WARNING_THRESHOLD) {
+        this.onWarning(
+          `${owner}/${name} has ${String(branchNames.length)} branches; scanning all of them may be slow and consume the API rate limit.`,
+        );
+      }
 
       for (const branch of branchNames) {
         const result = await this.collectBranchHistory({ owner, name, branch, authorId });
@@ -1071,11 +1108,9 @@ export class GitHubService {
           createdAt: node.createdAt,
           description: node.description,
           url: node.url,
-          files: node.files.map((file) => ({
-            name: file.name,
-            size: file.size,
-            text: file.text,
-          })),
+          files: (node.files ?? []).flatMap((file) =>
+            file ? [{ name: file.name, size: file.size, text: file.text }] : [],
+          ),
           repository: {
             owner: username,
             name: node.name,
@@ -1107,15 +1142,21 @@ export class GitHubService {
     for (;;) {
       let reachedOlder = false;
       for (const release of connection.nodes) {
+        // The connection is ordered by creation time, so the early stop must
+        // use createdAt; the range check uses the publication time so a
+        // release drafted earlier still counts from when it went live.
+        // (A release drafted before --since and published inside the range is
+        // missed by the early stop; documented in the README.)
         if (new Date(release.createdAt) < this.since) {
           reachedOlder = true;
           break;
         }
         if (release.author?.login !== username) continue;
-        if (!this.isWithinDateRange(release.createdAt)) continue;
+        const releaseTimestamp = release.publishedAt ?? release.createdAt;
+        if (!this.isWithinDateRange(releaseTimestamp)) continue;
         events.push({
           type: "Release",
-          createdAt: release.createdAt,
+          createdAt: releaseTimestamp,
           title: release.name ?? release.tagName,
           tagName: release.tagName,
           url: release.url,
@@ -1250,7 +1291,7 @@ export class GitHubService {
 
     for (let page = 1; page <= EVENTS_FEED_MAX_PAGES; page++) {
       const items = await this.executeRest<RestUserEvent[]>(
-        `/users/${username}/events?per_page=${String(EVENTS_FEED_PAGE_SIZE)}&page=${String(page)}`,
+        `/users/${encodeURIComponent(username)}/events?per_page=${String(EVENTS_FEED_PAGE_SIZE)}&page=${String(page)}`,
       );
 
       for (const item of items) {

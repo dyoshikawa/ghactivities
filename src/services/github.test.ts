@@ -25,6 +25,7 @@ const {
   pushedRepoNodes,
   restCalls,
   restResponsesByPath,
+  restFailureQueue,
 } = vi.hoisted(() => ({
   calls: [] as Array<{ query: string; variables: Record<string, unknown> }>,
   issueCommentSearchNodes: [] as unknown[],
@@ -48,6 +49,8 @@ const {
   pushedRepoNodes: [] as unknown[],
   restCalls: [] as string[],
   restResponsesByPath: new Map<string, unknown>(),
+  // Each entry makes the next REST call fail with the given status and body.
+  restFailureQueue: [] as { status: number; body: unknown }[],
 }));
 
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
@@ -190,6 +193,16 @@ vi.stubGlobal(
   vi.fn((url: string | URL) => {
     const fullPath = String(url).replace("https://api.github.com", "");
     restCalls.push(fullPath);
+    const failure = restFailureQueue.shift();
+    if (failure) {
+      return Promise.resolve({
+        ok: false,
+        status: failure.status,
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify(failure.body)),
+        json: () => Promise.resolve(failure.body),
+      } as unknown as Response);
+    }
     const preset =
       restResponsesByPath.get(fullPath) ?? restResponsesByPath.get(fullPath.split("?")[0] ?? "");
     const body = preset ?? (fullPath.startsWith("/users/") ? [] : { files: [] });
@@ -221,6 +234,7 @@ beforeEach(() => {
   pushedRepoNodes.length = 0;
   restCalls.length = 0;
   restResponsesByPath.clear();
+  restFailureQueue.length = 0;
 });
 
 const makeService = (params?: {
@@ -862,6 +876,14 @@ describe("username override", () => {
   });
 });
 
+const fileEntry = (index: number) => ({
+  filename: `file-${String(index)}.ts`,
+  status: "modified",
+  additions: 1,
+  deletions: 0,
+  patch: "+x",
+});
+
 describe("audit event collection", () => {
   const repoNode = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
 
@@ -911,6 +933,21 @@ describe("audit event collection", () => {
       (event) => event.type === "Gist",
     );
     expect(privateEvents.map((event) => event.repository.name)).toEqual(["bbb222"]);
+  });
+
+  it("tolerates a null gist files list", async () => {
+    gistNodes.push({
+      name: "ddd444",
+      description: null,
+      url: "https://gist.github.com/testuser/ddd444",
+      createdAt: "2024-01-05T00:00:00Z",
+      isPublic: true,
+      files: null,
+    });
+
+    const events = (await makeService().fetchAllEvents()).filter((event) => event.type === "Gist");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type === "Gist" && events[0].files).toEqual([]);
   });
 
   it("warns and skips gists when the token lacks gist access", async () => {
@@ -980,6 +1017,7 @@ describe("audit event collection", () => {
             tagName: "v1.1.0",
             url: "https://github.com/testuser/repo/releases/tag/v1.1.0",
             createdAt: "2024-01-10T00:00:00Z",
+            publishedAt: null,
             description: "notes",
             isPrerelease: false,
             isDraft: false,
@@ -996,10 +1034,23 @@ describe("audit event collection", () => {
             },
           },
           {
+            name: "published later",
+            tagName: "v1.0.2",
+            url: "https://github.com/testuser/repo/releases/tag/v1.0.2",
+            createdAt: "2024-01-09T12:00:00Z",
+            publishedAt: "2024-01-11T00:00:00Z",
+            description: null,
+            isPrerelease: false,
+            isDraft: false,
+            author: { login: "testuser" },
+            releaseAssets: { nodes: [] },
+          },
+          {
             name: "by someone else",
             tagName: "v1.0.1",
             url: "https://github.com/testuser/repo/releases/tag/v1.0.1",
             createdAt: "2024-01-09T00:00:00Z",
+            publishedAt: "2024-01-09T00:00:00Z",
             description: null,
             isPrerelease: false,
             isDraft: false,
@@ -1031,6 +1082,18 @@ describe("audit event collection", () => {
             contentType: "application/gzip",
           },
         ],
+        repository: { owner: "testuser", name: "repo", visibility: "PUBLIC" },
+      },
+      {
+        type: "Release",
+        createdAt: "2024-01-11T00:00:00Z",
+        title: "published later",
+        tagName: "v1.0.2",
+        url: "https://github.com/testuser/repo/releases/tag/v1.0.2",
+        body: null,
+        isPrerelease: false,
+        isDraft: false,
+        assets: [],
         repository: { owner: "testuser", name: "repo", visibility: "PUBLIC" },
       },
     ]);
@@ -1223,7 +1286,123 @@ describe("audit event collection", () => {
         repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
       },
     ]);
-    expect(restCalls).toContain("/repos/owner/repo/commits/abc");
+    expect(restCalls).toContain("/repos/owner/repo/commits/abc?page=1");
+  });
+
+  it("pages commit diffs past the 300-file REST cap", async () => {
+    contributionRepos.push(repoNode);
+    defaultBranchHistoryNodes.push({
+      oid: "big",
+      message: "vendored commit",
+      url: "https://github.com/owner/repo/commit/big",
+      committedDate: "2024-01-05T00:00:00Z",
+      author: { user: { login: "testuser" } },
+    });
+    restResponsesByPath.set("/repos/owner/repo/commits/big?page=1", {
+      files: Array.from({ length: 300 }, (_, index) => fileEntry(index)),
+    });
+    restResponsesByPath.set("/repos/owner/repo/commits/big?page=2", {
+      files: [fileEntry(300)],
+    });
+
+    const events = (await makeService({ commitDiff: true }).fetchAllEvents()).filter(
+      (event) => event.type === "Commit",
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type === "Commit" && events[0].diff?.length).toBe(301);
+  });
+
+  it("adds own repositories pushed within the range with --branches all", async () => {
+    pushedRepoNodes.push(
+      // Never-pushed repositories must be skipped, not treated as an early stop.
+      { owner: { login: "testuser" }, name: "never-pushed", visibility: "PUBLIC", pushedAt: null },
+      {
+        owner: { login: "testuser" },
+        name: "pushed-repo",
+        visibility: "PUBLIC",
+        pushedAt: "2024-01-10T00:00:00Z",
+      },
+      {
+        owner: { login: "testuser" },
+        name: "private-repo",
+        visibility: "PRIVATE",
+        pushedAt: "2024-01-09T00:00:00Z",
+      },
+      {
+        owner: { login: "testuser" },
+        name: "old-repo",
+        visibility: "PUBLIC",
+        pushedAt: "2023-01-01T00:00:00Z",
+      },
+    );
+    branchRefNodes.push({ name: "main" });
+    branchHistoryByRef.set("refs/heads/main", [
+      {
+        oid: "ccc",
+        message: "branch commit",
+        url: "https://github.com/testuser/pushed-repo/commit/ccc",
+        committedDate: "2024-01-11T00:00:00Z",
+        author: { user: { login: "testuser" } },
+      },
+    ]);
+
+    const events = (await makeService({ branches: "all" }).fetchAllEvents()).filter(
+      (event) => event.type === "Commit",
+    );
+    // Only the public repository pushed within the range is scanned: the
+    // private one is filtered by --visibility and the old one stops the scan.
+    expect(events.map((event) => event.repository.name)).toEqual(["pushed-repo"]);
+  });
+
+  it("warns when the range predates the events feed coverage", async () => {
+    const warnings: string[] = [];
+    await makeService({ onWarning: (message) => warnings.push(message) }).fetchAllEvents();
+    expect(warnings.some((message) => message.includes("most recent 90 days"))).toBe(true);
+  });
+
+  it("warns when the capped events feed does not reach --since", async () => {
+    const now = Date.now();
+    const feedItem = {
+      type: "PushEvent",
+      public: true,
+      created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+      repo: { name: "owner/repo" },
+      payload: {},
+    };
+    for (const page of [1, 2, 3]) {
+      restResponsesByPath.set(
+        `/users/testuser/events?per_page=100&page=${String(page)}`,
+        Array.from({ length: 100 }, () => feedItem),
+      );
+    }
+
+    const warnings: string[] = [];
+    await makeService({
+      since: new Date(now - 7 * 24 * 60 * 60 * 1000),
+      until: new Date(now),
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    expect(warnings.some((message) => message.includes("did not reach --since"))).toBe(true);
+    expect(warnings.some((message) => message.includes("most recent 90 days"))).toBe(false);
+  });
+
+  it("retries REST secondary rate limits using the response body message", async () => {
+    restFailureQueue.push({
+      status: 403,
+      body: { message: "You have exceeded a secondary rate limit. Please wait." },
+    });
+
+    const warnings: string[] = [];
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    expect(events).toEqual([]);
+    expect(restCalls.filter((path) => path.includes("/events")).length).toBeGreaterThanOrEqual(2);
+    expect(
+      warnings.some((message) => message.includes("retrying") && message.includes("rate limit")),
+    ).toBe(true);
   });
 
   it("omits diffs and uses the default branch without the new flags", async () => {

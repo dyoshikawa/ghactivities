@@ -490,6 +490,7 @@ const RELEASE_FIELDS = `
   tagName
   url
   createdAt
+  publishedAt
   description
   isPrerelease
   isDraft

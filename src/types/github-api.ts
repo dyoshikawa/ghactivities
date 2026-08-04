@@ -224,11 +224,14 @@ export interface GistNode {
   url: string;
   createdAt: string;
   isPublic: boolean;
-  files: {
-    name: string;
-    size: number;
-    text: string | null;
-  }[];
+  /** The list and its entries are nullable in GitHub's schema. */
+  files:
+    | ({
+        name: string;
+        size: number;
+        text: string | null;
+      } | null)[]
+    | null;
 }
 
 export interface GistsResponse {
@@ -263,6 +266,8 @@ export interface ReleaseNode {
   tagName: string;
   url: string;
   createdAt: string;
+  /** Null while the release is an unpublished draft. */
+  publishedAt: string | null;
   description: string | null;
   isPrerelease: boolean;
   isDraft: boolean;

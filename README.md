@@ -73,7 +73,7 @@ To include private repositories (`--visibility private` or `--visibility all`), 
 
 Events are written as a pretty-printed JSON array, sorted by `createdAt` according to `--order`.
 
-Each event shares a common shape and adds type-specific fields:
+Each event shares a common shape (`type`, `createdAt`, `repository`) and adds type-specific fields — for example, Commit events always carry a `branches` list (plus a `diff` file list with `--commit-diff`), comment events carry an `editHistory` list when the comment was edited, and Gist events carry a `files` list with file contents:
 
 ```json
 [
@@ -126,6 +126,8 @@ npx ghactivities scan ./ghactivities.json --provider openai
 ## Scanning activity with an LLM
 
 The `scan` subcommand reads the JSON produced by `ghactivities` and asks a large language model (via the [Vercel AI SDK](https://ai-sdk.dev/)) to summarize your activity into a Markdown report.
+
+Note that everything in the collected JSON — comment bodies and edit histories, gist file contents, READMEs, and commit diffs — is sent to the selected LLM provider. Review the collected data (or narrow what you collect) before scanning if it may contain sensitive content.
 
 ```bash
 # Scan a single file
@@ -180,8 +182,8 @@ For `vertexai`, an API key uses Vertex AI express mode. You can also set `--vert
 
 - **Commits** are collected from each repository's **default branch** by default. With `--branches all`, every branch is scanned and each commit is emitted once with a `branches` list of the branches it was found on. Repository discovery is based on GitHub's contribution data (default-branch commits) plus, with `--branches all`, your own repositories pushed within the range — branches of repositories you do not own and never committed to on the default branch can still be missed.
 - **Gists** need gist read access on the token (the `gist` scope on classic tokens, or the Gists permission on fine-grained tokens). Without it, gists are skipped with a warning instead of failing the run.
-- **Releases** are discovered by walking the user's **own** repositories; releases published in repositories owned by someone else are not collected.
-- **Repository** events cover repositories **created** within the range; a repository that was switched from private to public is not detected as an event (GitHub exposes no such timestamp).
+- **Releases** are discovered by walking the user's **own** repositories; releases published in repositories owned by someone else are not collected. A release counts from its publication time (`publishedAt`), but the scan stops at releases **created** before `--since` — a release drafted before the range and published inside it is not collected.
+- **Repository** events cover repositories **created** within the range; a repository that was switched from private to public is not detected as an event (GitHub exposes no such timestamp). The `readme` field reads exactly `README.md` on the default branch — other spellings (`readme.md`, `README.rst`, a plain `README` with no extension) come back as `null`.
 - **WikiPageEdit** events come from the GitHub events feed, which only covers the most recent **90 days** and at most **300 events** per user; a warning is printed when the requested range cannot be fully covered.
 - **editHistory** on comment events contains at most the 5 most recent prior revisions of an edited comment.
 - With `--user`, events are collected for that user, but only from repositories the **token** can see: another user's activity in private repositories appears (with `--visibility private` or `all`) only when the token also has read access to those repositories.
