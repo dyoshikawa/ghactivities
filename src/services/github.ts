@@ -124,6 +124,16 @@ interface GitHubApiErrorShape {
   errors?: { type?: string }[];
 }
 
+// Shared by searchAllNodes and searchWindowNodes; the window is optional for
+// the former (defaulting to the full collection range) and required for the
+// latter.
+interface SearchParams {
+  query: string;
+  qualifiers: string;
+  dateField: "created" | "updated";
+  extraVariables?: Record<string, unknown>;
+}
+
 // Maps a comment's prior revisions to the event's editHistory field;
 // undefined (field omitted) when the comment was never edited.
 function toEditHistory(
@@ -144,12 +154,12 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-function hasGraphqlErrorType(error: unknown, types: string[]): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const err = error as GitHubApiErrorShape;
+function hasGraphqlErrorType(params: { error: unknown; types: string[] }): boolean {
+  if (typeof params.error !== "object" || params.error === null) return false;
+  const err = params.error as GitHubApiErrorShape;
   return (
     err.errors?.some(
-      (graphqlError) => graphqlError.type !== undefined && types.includes(graphqlError.type),
+      (graphqlError) => graphqlError.type !== undefined && params.types.includes(graphqlError.type),
     ) ?? false
   );
 }
@@ -157,7 +167,7 @@ function hasGraphqlErrorType(error: unknown, types: string[]): boolean {
 // GraphQL errors raised when the token cannot access a resource at all, e.g.
 // a fine-grained token without the Gists read permission.
 function isTokenAccessError(error: unknown): boolean {
-  return hasGraphqlErrorType(error, ["FORBIDDEN", "INSUFFICIENT_SCOPES"]);
+  return hasGraphqlErrorType({ error, types: ["FORBIDDEN", "INSUFFICIENT_SCOPES"] });
 }
 
 // Node-heavy searches (comment connections with edit histories) can exceed
@@ -165,7 +175,7 @@ function isTokenAccessError(error: unknown): boolean {
 // result count is within the 1,000-result cap. The failure is deterministic
 // for a given page, so the remedy is a smaller date window, not a retry.
 function isResourceLimitError(error: unknown): boolean {
-  return hasGraphqlErrorType(error, ["RESOURCE_LIMITS_EXCEEDED"]);
+  return hasGraphqlErrorType({ error, types: ["RESOURCE_LIMITS_EXCEEDED"] });
 }
 
 function isRetryableError(error: unknown): boolean {
@@ -408,13 +418,9 @@ export class GitHubService {
   // split further: a capped day loses its tail with a warning, while a
   // resource-limited day rethrows — its tail pages cannot be fetched, so
   // continuing would silently lose data.
-  private async searchAllNodes<TNode>(params: {
-    query: string;
-    qualifiers: string;
-    dateField: "created" | "updated";
-    window?: DateRange;
-    extraVariables?: Record<string, unknown>;
-  }): Promise<TNode[]> {
+  private async searchAllNodes<TNode>(
+    params: SearchParams & { window?: DateRange },
+  ): Promise<TNode[]> {
     const window = params.window ?? this.initialSearchWindow(params.dateField);
     try {
       const result = await this.searchWindowNodes<TNode>({ ...params, window });
@@ -438,13 +444,9 @@ export class GitHubService {
   // Fetches every page of a single window's search. Splitting is owned by
   // searchAllNodes: a multi-day window whose result count exceeds the cap is
   // reported as split-required instead of being split here.
-  private async searchWindowNodes<TNode>(params: {
-    query: string;
-    qualifiers: string;
-    dateField: "created" | "updated";
-    window: DateRange;
-    extraVariables?: Record<string, unknown>;
-  }): Promise<{ kind: "nodes"; nodes: TNode[] } | { kind: "split-required" }> {
+  private async searchWindowNodes<TNode>(
+    params: SearchParams & { window: DateRange },
+  ): Promise<{ kind: "nodes"; nodes: TNode[] } | { kind: "split-required" }> {
     const window = params.window;
     const searchQuery = this.buildWindowedSearchQuery({
       qualifiers: params.qualifiers,
