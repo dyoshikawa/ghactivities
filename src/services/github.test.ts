@@ -503,6 +503,74 @@ describe("search result cap handling", () => {
   });
 });
 
+// Deep pages of node-heavy searches are aborted by GitHub with this error
+// even when the result count is under the 1,000-result cap.
+const resourceLimitError = () =>
+  Object.assign(new Error("Resource limits for this query exceeded."), {
+    errors: [{ type: "RESOURCE_LIMITS_EXCEEDED" }],
+  });
+
+describe("search resource limit handling", () => {
+  it("splits the date window in half when the search hits GitHub's resource limits", async () => {
+    const warnings: string[] = [];
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-15", [resourceLimitError()]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-08", {
+      issueCount: 400,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-half")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 300,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-half", "second-half"]);
+    expect(withoutWikiFeedWarnings(warnings)).toEqual([]);
+  });
+
+  it("keeps splitting when a half still hits resource limits", async () => {
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-15", [resourceLimitError()]);
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-08", [resourceLimitError()]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-04", {
+      issueCount: 200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-05..2024-01-08", {
+      issueCount: 200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 300,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-quarter", "second-quarter", "second-half"]);
+  });
+
+  it("fails with a clear error when a single UTC day still hits resource limits", async () => {
+    failures.set("author:testuser is:issue created:2024-01-05..2024-01-05", [resourceLimitError()]);
+
+    await expect(
+      makeService({
+        since: new Date("2024-01-05T00:00:00Z"),
+        until: new Date("2024-01-05T23:59:59Z"),
+      }).fetchAllEvents(),
+    ).rejects.toThrow(/Failed to fetch issues: .*Resource limits for this query exceeded/);
+  });
+});
+
 const visibilityNode = (visibility: string) => ({
   title: `${visibility} issue`,
   url: `https://github.com/owner/repo/issues/${visibility}`,
