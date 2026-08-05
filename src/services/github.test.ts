@@ -34,8 +34,8 @@ const {
   reviewPagesByCursor: new Map<string, unknown>(),
   searchResponsesByQuery: new Map<string, unknown>(),
   // Failure injection: while a substring's error list is non-empty, calls
-  // whose query or searchQuery contains the substring reject with the next
-  // error from the list.
+  // whose query, searchQuery, or "after:<cursor>" suffix contains the
+  // substring reject with the next error from the list.
   failures: new Map<string, unknown[]>(),
   // Nodes served to the commit/gist/release/repository/wiki fetchers.
   contributionRepos: [] as unknown[],
@@ -57,7 +57,7 @@ const {
 // each query the service issues, and records the (query, variables) pairs.
 vi.mock("@octokit/graphql", () => {
   const findInjectedFailure = (query: string, variables: Record<string, unknown>) => {
-    const failureKey = `${query} ${String(variables.searchQuery ?? "")}`;
+    const failureKey = `${query} ${String(variables.searchQuery ?? "")} after:${String(variables.after ?? "")}`;
     for (const [substring, errors] of failures) {
       if (errors.length > 0 && failureKey.includes(substring)) {
         return errors.shift();
@@ -500,6 +500,161 @@ describe("search result cap handling", () => {
     expect(capWarnings).toHaveLength(1);
     expect(capWarnings[0]).toContain("1000");
     expect(capWarnings[0]).toContain("author:testuser is:issue created:2024-01-05..2024-01-05");
+  });
+});
+
+// Deep pages of node-heavy searches are aborted by GitHub with this error
+// even when the result count is under the 1,000-result cap.
+const resourceLimitError = () =>
+  Object.assign(new Error("Resource limits for this query exceeded."), {
+    errors: [{ type: "RESOURCE_LIMITS_EXCEEDED" }],
+  });
+
+describe("search resource limit handling", () => {
+  it("splits the date window in half when the search hits GitHub's resource limits", async () => {
+    const warnings: string[] = [];
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-15", [resourceLimitError()]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-08", {
+      issueCount: 400,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-half")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 300,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService({
+      onWarning: (message) => warnings.push(message),
+    }).fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-half", "second-half"]);
+    const splitWarnings = withoutWikiFeedWarnings(warnings);
+    expect(splitWarnings).toHaveLength(1);
+    expect(splitWarnings[0]).toContain("resource limits");
+    expect(splitWarnings[0]).toContain("2024-01-01..2024-01-15");
+  });
+
+  it("discards the partial window and fetches the halves without duplicates when a deep page fails", async () => {
+    // The real-world failure mode: the first pages of a window succeed, then
+    // a deep page is aborted. The partially fetched nodes must be discarded
+    // (not merged with the halves' results) so no event is duplicated.
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+      issueCount: 612,
+      pageInfo: { hasNextPage: true, endCursor: "CURSOR_PAGE_2" },
+      nodes: [issueNode("page-one-discarded")],
+    });
+    failures.set("created:2024-01-01..2024-01-15 after:CURSOR_PAGE_2", [resourceLimitError()]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-08", {
+      issueCount: 400,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-half")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 212,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-half", "second-half"]);
+  });
+
+  it("keeps splitting when a half still hits resource limits", async () => {
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-15", [resourceLimitError()]);
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-08", [resourceLimitError()]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-04", {
+      issueCount: 200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-05..2024-01-08", {
+      issueCount: 200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 300,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-quarter", "second-quarter", "second-half"]);
+  });
+
+  it("fails with a clear error when a single UTC day still hits resource limits", async () => {
+    failures.set("author:testuser is:issue created:2024-01-05..2024-01-05", [resourceLimitError()]);
+
+    await expect(
+      makeService({
+        since: new Date("2024-01-05T00:00:00Z"),
+        until: new Date("2024-01-05T23:59:59Z"),
+      }).fetchAllEvents(),
+    ).rejects.toThrow(/Failed to fetch issues: .*Resource limits for this query exceeded/);
+  });
+
+  it("splits a resource-limited half produced by cap splitting", async () => {
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+      issueCount: 1500,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [],
+    });
+    failures.set("author:testuser is:issue created:2024-01-01..2024-01-08", [resourceLimitError()]);
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-04", {
+      issueCount: 200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("first-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-05..2024-01-08", {
+      issueCount: 200,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-quarter")],
+    });
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-09..2024-01-15", {
+      issueCount: 300,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [issueNode("second-half")],
+    });
+
+    const events = await makeService().fetchAllEvents();
+
+    const issueTitles = events.filter((event) => event.type === "Issue").map((e) => e.title);
+    expect(issueTitles).toEqual(["first-quarter", "second-quarter", "second-half"]);
+  });
+
+  it("propagates a descendant single-day failure without re-splitting the ancestor window", async () => {
+    // A capped two-day window splits into two single days; the first day is
+    // aborted by resource limits and cannot be split further. The ancestor
+    // must not mistake that failure for its own window's abort and re-split:
+    // the failing day is queried exactly once.
+    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-05..2024-01-06", {
+      issueCount: 1500,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [],
+    });
+    failures.set("author:testuser is:issue created:2024-01-05..2024-01-05", [
+      resourceLimitError(),
+      resourceLimitError(),
+    ]);
+
+    await expect(
+      makeService({
+        since: new Date("2024-01-05T00:00:00Z"),
+        until: new Date("2024-01-06T23:59:59Z"),
+      }).fetchAllEvents(),
+    ).rejects.toThrow(/Failed to fetch issues/);
+
+    const failingDayCalls = calls.filter((call) =>
+      String(call.variables.searchQuery ?? "").includes("created:2024-01-05..2024-01-05"),
+    );
+    expect(failingDayCalls).toHaveLength(1);
   });
 });
 
