@@ -144,17 +144,20 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-// GraphQL errors raised when the token cannot access a resource at all, e.g.
-// a fine-grained token without the Gists read permission.
-function isTokenAccessError(error: unknown): boolean {
+function hasGraphqlErrorType(error: unknown, types: string[]): boolean {
   if (typeof error !== "object" || error === null) return false;
   const err = error as GitHubApiErrorShape;
   return (
     err.errors?.some(
-      (graphqlError) =>
-        graphqlError.type === "FORBIDDEN" || graphqlError.type === "INSUFFICIENT_SCOPES",
+      (graphqlError) => graphqlError.type !== undefined && types.includes(graphqlError.type),
     ) ?? false
   );
+}
+
+// GraphQL errors raised when the token cannot access a resource at all, e.g.
+// a fine-grained token without the Gists read permission.
+function isTokenAccessError(error: unknown): boolean {
+  return hasGraphqlErrorType(error, ["FORBIDDEN", "INSUFFICIENT_SCOPES"]);
 }
 
 // Node-heavy searches (comment connections with edit histories) can exceed
@@ -162,11 +165,7 @@ function isTokenAccessError(error: unknown): boolean {
 // result count is within the 1,000-result cap. The failure is deterministic
 // for a given page, so the remedy is a smaller date window, not a retry.
 function isResourceLimitError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const err = error as GitHubApiErrorShape;
-  return (
-    err.errors?.some((graphqlError) => graphqlError.type === "RESOURCE_LIMITS_EXCEEDED") ?? false
-  );
+  return hasGraphqlErrorType(error, ["RESOURCE_LIMITS_EXCEEDED"]);
 }
 
 function isRetryableError(error: unknown): boolean {
@@ -407,7 +406,8 @@ export class GitHubService {
   // the total result count exceeds GitHub's 1,000-result cap or the query is
   // aborted with a RESOURCE_LIMITS_EXCEEDED error. A single UTC day cannot be
   // split further: a capped day loses its tail with a warning, while a
-  // resource-limited day rethrows because none of its pages can be fetched.
+  // resource-limited day rethrows — its tail pages cannot be fetched, so
+  // continuing would silently lose data.
   private async searchAllNodes<TNode>(params: {
     query: string;
     qualifiers: string;
@@ -417,23 +417,34 @@ export class GitHubService {
   }): Promise<TNode[]> {
     const window = params.window ?? this.initialSearchWindow(params.dateField);
     try {
-      return await this.searchWindowNodes<TNode>({ ...params, window });
+      const result = await this.searchWindowNodes<TNode>({ ...params, window });
+      if (result.kind === "nodes") return result.nodes;
     } catch (error) {
       if (!isResourceLimitError(error) || !spansMultipleUtcDays(window)) throw error;
-      const [firstHalf, secondHalf] = splitDateRangeAtUtcDayBoundary(window);
-      const firstNodes = await this.searchAllNodes<TNode>({ ...params, window: firstHalf });
-      const secondNodes = await this.searchAllNodes<TNode>({ ...params, window: secondHalf });
-      return [...firstNodes, ...secondNodes];
+      this.onWarning(
+        `GitHub aborted a "${params.qualifiers}" search over ${toUtcDayString(window.since)}..${toUtcDayString(window.until)} due to per-query resource limits; splitting the window and searching again.`,
+      );
     }
+    // Reached when the window's result count exceeds the cap or its query was
+    // aborted by resource limits. The recursion sits outside the try block so
+    // a descendant window's failure propagates instead of being mistaken for
+    // this window's own resource-limit abort and re-split.
+    const [firstHalf, secondHalf] = splitDateRangeAtUtcDayBoundary(window);
+    const firstNodes = await this.searchAllNodes<TNode>({ ...params, window: firstHalf });
+    const secondNodes = await this.searchAllNodes<TNode>({ ...params, window: secondHalf });
+    return [...firstNodes, ...secondNodes];
   }
 
+  // Fetches every page of a single window's search. Splitting is owned by
+  // searchAllNodes: a multi-day window whose result count exceeds the cap is
+  // reported as split-required instead of being split here.
   private async searchWindowNodes<TNode>(params: {
     query: string;
     qualifiers: string;
     dateField: "created" | "updated";
     window: DateRange;
     extraVariables?: Record<string, unknown>;
-  }): Promise<TNode[]> {
+  }): Promise<{ kind: "nodes"; nodes: TNode[] } | { kind: "split-required" }> {
     const window = params.window;
     const searchQuery = this.buildWindowedSearchQuery({
       qualifiers: params.qualifiers,
@@ -456,10 +467,7 @@ export class GitHubService {
     }
     if (totalCount > SEARCH_RESULT_CAP) {
       if (spansMultipleUtcDays(window)) {
-        const [firstHalf, secondHalf] = splitDateRangeAtUtcDayBoundary(window);
-        const firstNodes = await this.searchAllNodes<TNode>({ ...params, window: firstHalf });
-        const secondNodes = await this.searchAllNodes<TNode>({ ...params, window: secondHalf });
-        return [...firstNodes, ...secondNodes];
+        return { kind: "split-required" };
       }
       this.onWarning(
         `GitHub search matched ${String(totalCount)} items for "${searchQuery}" but returns at most ${String(SEARCH_RESULT_CAP)}; the excess items are skipped.`,
@@ -476,7 +484,7 @@ export class GitHubService {
       });
       nodes.push(...response.search.nodes);
     }
-    return nodes;
+    return { kind: "nodes", nodes };
   }
 
   private matchesVisibility(visibility: RepositoryVisibility): boolean {
