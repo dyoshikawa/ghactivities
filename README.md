@@ -125,7 +125,7 @@ npx ghactivities scan ./ghactivities.json --provider openai
 
 ## Scanning activity with an LLM
 
-The `scan` subcommand reads the JSON produced by `ghactivities` and asks a large language model (via the [Vercel AI SDK](https://ai-sdk.dev/)) to summarize your activity into a Markdown report.
+The `scan` subcommand reads the JSON produced by `ghactivities` and asks a large language model (via the [Vercel AI SDK](https://ai-sdk.dev/)) to summarize your activity into a Markdown report. The report covers an overall summary, the main themes grouped by repository, notable items, and a severity-rated **Risks and concerns** section that flags content warranting attention (for example potential secrets in code, diffs, comments, or gists, customer names or internal business information exposed in public repositories, or sensitive information left in comment edit histories).
 
 Note that everything in the collected JSON — comment bodies and edit histories, gist file contents, READMEs, and commit diffs — is sent to the selected LLM provider. Review the collected data (or narrow what you collect) before scanning if it may contain sensitive content.
 

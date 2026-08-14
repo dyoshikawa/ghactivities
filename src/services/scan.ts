@@ -22,12 +22,23 @@ export const MAX_SCAN_INPUT_TOKENS: Record<ScanConfig["provider"], number> = {
 
 const SYSTEM_PROMPT = `You are an assistant that reviews a developer's GitHub activity.
 The user provides a JSON export of their activity (issues, issue comments, discussions,
-discussion comments, pull requests, pull request comments, pull request review comments,
-and commits).
+discussion comments, pull requests, pull request conversation comments, pull request
+review comments, commits, commit comments, gists, releases, repositories, and wiki page
+edits). Commit events may include per-file diffs, and comment events may include an
+editHistory field with prior revisions of the comment.
 Analyze it and produce a concise report in Markdown that includes:
 - A short overall summary of what the developer worked on.
 - The main themes or projects, grouped by repository when useful.
 - Notable pull requests, issues, or discussions worth highlighting.
+- A "Risks and concerns" section listing anything that warrants the developer's
+  attention, each rated with a severity (critical / high / medium / low) — for example
+  potential secrets, credentials, or tokens appearing in code, diffs, comments, or
+  gists; customer names, client project details, or other internal/confidential
+  business information exposed in public repositories; sensitive information visible
+  in comment edit histories; or other content that may need follow-up or removal.
+  Each event carries its repository's visibility — treat exposure in PUBLIC
+  repositories as more severe than the same content in private ones. If there is
+  nothing to report, state that explicitly.
 Be factual and only rely on the provided data.`;
 
 /** Build a Vercel AI SDK language model for the configured provider. */
