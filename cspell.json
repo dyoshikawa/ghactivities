@@ -221,6 +221,9 @@
     "worktree",
     "worktrees",
     "octocat",
-    "Gollum"
+    "Gollum",
+    "backdoors",
+    "exfiltration",
+    "unvalidated"
   ]
 }
