@@ -42,6 +42,8 @@ jobs:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
           experimental: true
+          # Do not restore tools from a cache other jobs could have written.
+          cache: false
 
       # The checkout keeps a write-scoped token (the job pushes), so dependency
       # lifecycle scripts are skipped; generated files are already committed.
@@ -54,9 +56,10 @@ jobs:
         with:
           input-text: ${{ inputs.model }}
 
-      # Equivalent of anomalyco/opencode/github@v1.17.13, inlined because that
-      # action installs the latest opencode with `curl | bash` at run time.
-      # Here the release binary is pinned and checked against its SHA-256.
+      # Replaces anomalyco/opencode/github, which installs whatever opencode is
+      # the latest release with `curl | bash` at run time. The binary is pinned
+      # here (1.17.13, the version of the action previously referenced) and
+      # checked against its SHA-256. Bump OPENCODE_VERSION/OPENCODE_SHA256 on purpose.
       - name: Install opencode
         env:
           OPENCODE_VERSION: 1.17.13

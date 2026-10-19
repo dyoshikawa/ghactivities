@@ -59,6 +59,8 @@ jobs:
           version: 2026.10.14
           sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
           experimental: true
+          # Do not restore tools from a cache other jobs could have written.
+          cache: false
 
       # Lifecycle scripts are skipped so no dependency install script can run
       # while the OIDC publish credential is available. The root `prepare`
