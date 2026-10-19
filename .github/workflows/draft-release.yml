@@ -21,14 +21,15 @@ jobs:
       github.actor == 'cm-dyoshikawa'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # `USE_GITHUB_TOKEN: "true"` below makes opencode use GITHUB_TOKEN directly,
+    # so no OIDC token (`id-token: write`) is needed. The job pushes a
+    # release branch, opens a PR, and creates a draft release.
     permissions:
-      id-token: write
       contents: write
       pull-requests: write
-      issues: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
 
@@ -38,10 +39,16 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
+          version: 2026.10.14
+          sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
           experimental: true
+          # Do not restore tools from a cache other jobs could have written.
+          cache: false
 
+      # The checkout keeps a write-scoped token (the job pushes), so dependency
+      # lifecycle scripts are skipped; generated files are already committed.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Select model
         id: select-model
@@ -49,17 +56,31 @@ jobs:
         with:
           input-text: ${{ inputs.model }}
 
+      # Replaces anomalyco/opencode/github, which installs whatever opencode is
+      # the latest release with `curl | bash` at run time. The binary is pinned
+      # here (1.17.13, the version of the action previously referenced) and
+      # checked against its SHA-256. Bump OPENCODE_VERSION/OPENCODE_SHA256 on purpose.
+      - name: Install opencode
+        env:
+          OPENCODE_VERSION: 1.17.13
+          OPENCODE_SHA256: 157afa289d1a8d9372de0ce19ac726119b937a1f6b201808d46f06e4e59bb348
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/opencode.tar.gz" \
+            "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz"
+          echo "${OPENCODE_SHA256}  $RUNNER_TEMP/opencode.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.opencode/bin"
+          tar -xzf "$RUNNER_TEMP/opencode.tar.gz" -C "$HOME/.opencode/bin" opencode
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
       - name: Run OpenCode to draft release
-        # Third-party action executes an AI agent with repo secrets; pin to a full SHA.
-        uses: anomalyco/opencode/github@10c894bdeef3618f5666fb506ef7f9491bb964d8 # v1.17.13
+        run: opencode github run
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_NEW_VERSION: ${{ inputs.new_version }}
-        with:
-          model: ${{ steps.select-model.outputs.model }}
-          use_github_token: "true"
-          share: false
-          prompt: |
+          MODEL: ${{ steps.select-model.outputs.model }}
+          USE_GITHUB_TOKEN: "true"
+          SHARE: "false"
+          PROMPT: |
             Run the `draft-release` skill. Use the value of the `$INPUT_NEW_VERSION` environment variable as the skill's argument (it may be empty, in which case the skill will determine the new version automatically).
