@@ -21,14 +21,15 @@ jobs:
       github.actor == 'cm-dyoshikawa'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # `use_github_token: "true"` below makes the OpenCode action use GITHUB_TOKEN
+    # directly, so no OIDC token (`id-token: write`) is needed. The job pushes a
+    # release branch, opens a PR, and creates a draft release.
     permissions:
-      id-token: write
       contents: write
       pull-requests: write
-      issues: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
 
