@@ -56,11 +56,14 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
+          version: 2026.10.14
+          sha256: 50be7185bcf75929f01cc5630276bcb43ca367f7c5b176e2580903d28c611dc4
           experimental: true
 
       # Lifecycle scripts are skipped so no dependency install script can run
-      # with the OIDC publish credential available; the steps `prepare` would
-      # run (rulesync generate) are not needed to check, build or publish.
+      # while the OIDC publish credential is available. The root `prepare`
+      # (git hooks + rulesync generate) is not needed: generated files are
+      # committed and CI checks they are up to date.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
@@ -74,5 +77,7 @@ jobs:
       - name: Build project
         run: pnpm run build
 
+      # `dist/` was built and checked above; `--ignore-scripts` publishes it as
+      # is instead of re-running `prepublishOnly`/`prepare` with the credential.
       - name: Publish to npm
-        run: pnpm publish --no-git-checks
+        run: pnpm publish --no-git-checks --ignore-scripts
