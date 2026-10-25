@@ -167,7 +167,7 @@ vi.mock("@octokit/graphql", () => {
     // the discovery query nests releases under user { repositories }.
     if (query.includes("releases(first: $first")) {
       return Promise.resolve({
-        repository: { releases: { pageInfo: noNextPage, nodes: [] } },
+        repository: { releases: connection("releases", variables, []) },
       });
     }
     if (query.includes("releases(")) {
@@ -1823,26 +1823,26 @@ const createdRepo = (name: string, createdAt: string) => ({
   object: null,
 });
 
-const releaseRepo = (name: string) => ({
+const releaseNode = (name: string, createdAt: string) => ({
+  name,
+  tagName: name,
+  url: `https://github.com/testuser/repo/releases/tag/${name}`,
+  createdAt,
+  publishedAt: createdAt,
+  description: null,
+  isPrerelease: false,
+  isDraft: false,
+  author: { login: "testuser" },
+  releaseAssets: { nodes: [] },
+});
+
+const releaseRepo = (name: string, releasesEndCursor: string | null = null) => ({
   owner: { login: "testuser" },
   name,
   visibility: "PUBLIC",
   releases: connectionPage(
-    [
-      {
-        name: `${name} release`,
-        tagName: "v1",
-        url: `https://github.com/testuser/${name}/releases/tag/v1`,
-        createdAt: "2024-01-05T00:00:00Z",
-        publishedAt: "2024-01-05T00:00:00Z",
-        description: null,
-        isPrerelease: false,
-        isDraft: false,
-        author: { login: "testuser" },
-        releaseAssets: { nodes: [] },
-      },
-    ],
-    null,
+    [releaseNode(`${name} release`, "2024-01-05T00:00:00Z")],
+    releasesEndCursor,
   ),
 });
 
@@ -1926,6 +1926,28 @@ describe("connection pagination", () => {
     expect(
       events.filter((event) => event.type === "Release").map((event) => event.repository.name),
     ).toEqual(["a", "b"]);
+  });
+
+  it("pages a repository's releases and stops at the first one created before --since", async () => {
+    connectionPages.set("releaseRepos:", connectionPage([releaseRepo("repo", "L2")], null));
+    connectionPages.set(
+      "releases:L2",
+      connectionPage(
+        [
+          releaseNode("second page", "2024-01-04T00:00:00Z"),
+          releaseNode("too old", "2023-12-01T00:00:00Z"),
+        ],
+        "L3",
+      ),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(events.filter((event) => event.type === "Release").map((event) => event.title)).toEqual([
+      "repo release",
+      "second page",
+    ]);
+    expect(afterCursors("releases(first: $first")).toEqual(["L2"]);
   });
 
   it("pages pushed repositories and branches with --branches all", async () => {
