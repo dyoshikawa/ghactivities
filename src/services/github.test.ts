@@ -1715,6 +1715,30 @@ describe("search-based event shapes", () => {
     },
   });
 
+  it("omits editHistory for own comments that were never edited", async () => {
+    const node = commentedNode("pull");
+    searchNodesByQualifiers.set("commenter:testuser is:pr", [
+      {
+        ...node,
+        comments: {
+          pageInfo: noNextPage,
+          nodes: [
+            { ...node.comments.nodes[0], userContentEdits: null },
+            { ...node.comments.nodes[0], url: "second", userContentEdits: { nodes: [] } },
+          ],
+        },
+      },
+    ]);
+
+    const events = await makeService().fetchAllEvents();
+
+    const comments = events.filter((event) => event.type === "PullRequestComment");
+    expect(comments).toHaveLength(2);
+    for (const comment of comments) {
+      expect(comment).not.toHaveProperty("editHistory");
+    }
+  });
+
   it("maps authored items and own comments to events with a stable field order", async () => {
     searchNodesByQualifiers.set("author:testuser is:issue", [
       authoredNode("issues"),
