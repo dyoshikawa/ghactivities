@@ -333,21 +333,6 @@ export const CONTRIBUTIONS_COLLECTION_QUERY = `
             name
             visibility
           }
-          contributions(first: 100) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              occurredAt
-              commitCount
-              repository {
-                owner { login }
-                name
-                visibility
-              }
-            }
-          }
         }
       }
     }

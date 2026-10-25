@@ -132,16 +132,6 @@ export interface PullRequestWithReviewsNode {
   reviews: ReviewsConnection;
 }
 
-interface CommitContributionNode {
-  occurredAt: string;
-  repository: {
-    owner: { login: string };
-    name: string;
-    visibility: RepositoryVisibility;
-  };
-  commitCount: number;
-}
-
 export interface ContributionsCollectionResponse {
   user: {
     contributionsCollection: {
@@ -150,10 +140,6 @@ export interface ContributionsCollectionResponse {
           owner: { login: string };
           name: string;
           visibility: RepositoryVisibility;
-        };
-        contributions: {
-          pageInfo: PageInfo;
-          nodes: CommitContributionNode[];
         };
       }[];
     };
