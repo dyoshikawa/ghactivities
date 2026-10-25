@@ -13,6 +13,7 @@ const {
   commentPagesByCursor,
   reviewPagesByCursor,
   searchResponsesByQuery,
+  searchNodesByQualifiers,
   failures,
   contributionRepos,
   defaultBranchHistoryNodes,
@@ -33,6 +34,9 @@ const {
   commentPagesByCursor: new Map<string, unknown>(),
   reviewPagesByCursor: new Map<string, unknown>(),
   searchResponsesByQuery: new Map<string, unknown>(),
+  // Nodes served to every search whose query starts with the key (the
+  // fetcher's qualifiers), independent of the date window appended to it.
+  searchNodesByQualifiers: new Map<string, unknown[]>(),
   // Failure injection: while a substring's error list is non-empty, calls
   // whose query, searchQuery, or "after:<cursor>" suffix contains the
   // substring reject with the next error from the list.
@@ -82,6 +86,9 @@ vi.mock("@octokit/graphql", () => {
     const preset = searchResponsesByQuery.get(searchQuery);
     if (preset) return { search: preset };
     let nodes: unknown[] = [];
+    for (const [qualifiers, qualifierNodes] of searchNodesByQualifiers) {
+      if (searchQuery.startsWith(`${qualifiers} `)) nodes = qualifierNodes;
+    }
     if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
       nodes = issueCommentSearchNodes;
     }
@@ -222,6 +229,7 @@ beforeEach(() => {
   commentPagesByCursor.clear();
   reviewPagesByCursor.clear();
   searchResponsesByQuery.clear();
+  searchNodesByQualifiers.clear();
   failures.clear();
   contributionRepos.length = 0;
   defaultBranchHistoryNodes.length = 0;
@@ -1646,5 +1654,135 @@ describe("GitHubService GraphQL variables", () => {
     for (const call of searchCalls) {
       expect(Object.hasOwn(call.variables, "searchQuery")).toBe(true);
     }
+  });
+});
+
+// JSON.stringify keeps key order, which is part of the output format.
+const json = (value: unknown) => JSON.stringify(value);
+
+describe("search-based event shapes", () => {
+  const repository = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
+  const privateRepository = { owner: { login: "owner" }, name: "secret", visibility: "PRIVATE" };
+  const eventRepository = { owner: "owner", name: "repo", visibility: "PUBLIC" };
+  const noNextPage = { hasNextPage: false, endCursor: null };
+  const edits = {
+    nodes: [{ editedAt: "2024-01-06T00:00:00Z", deletedAt: null, diff: "old text" }],
+  };
+
+  const authoredNode = (kind: string) => ({
+    title: `${kind} title`,
+    url: `https://github.com/owner/repo/${kind}/1`,
+    body: `${kind} body`,
+    createdAt: "2024-01-03T00:00:00Z",
+    repository,
+  });
+
+  const commentedNode = (kind: string) => ({
+    id: `${kind}_NODE_ID`,
+    title: `${kind} title`,
+    url: `https://github.com/owner/repo/${kind}/2`,
+    createdAt: "2023-06-01T00:00:00Z",
+    repository,
+    comments: {
+      pageInfo: noNextPage,
+      nodes: [
+        {
+          body: `${kind} comment`,
+          url: `https://github.com/owner/repo/${kind}/2#comment-1`,
+          createdAt: "2024-01-05T00:00:00Z",
+          author: { login: "testuser" },
+          userContentEdits: edits,
+        },
+        {
+          body: "someone else",
+          url: `https://github.com/owner/repo/${kind}/2#comment-2`,
+          createdAt: "2024-01-05T00:00:00Z",
+          author: { login: "someone" },
+          userContentEdits: null,
+        },
+      ],
+    },
+  });
+
+  it("maps authored items and own comments to events with a stable field order", async () => {
+    searchNodesByQualifiers.set("author:testuser is:issue", [
+      authoredNode("issues"),
+      { ...authoredNode("hidden"), repository: privateRepository },
+    ]);
+    searchNodesByQualifiers.set("author:testuser type:discussion", [authoredNode("discussions")]);
+    searchNodesByQualifiers.set("author:testuser is:pr", [authoredNode("pull")]);
+    searchNodesByQualifiers.set("commenter:testuser type:discussion", [
+      commentedNode("discussions"),
+    ]);
+    searchNodesByQualifiers.set("commenter:testuser is:pr", [commentedNode("pull")]);
+
+    const events = await makeService().fetchAllEvents();
+
+    const ofType = (type: string) => events.filter((event) => event.type === type);
+    expect(json(ofType("Issue"))).toBe(
+      json([
+        {
+          type: "Issue",
+          createdAt: "2024-01-03T00:00:00Z",
+          title: "issues title",
+          url: "https://github.com/owner/repo/issues/1",
+          body: "issues body",
+          repository: eventRepository,
+        },
+      ]),
+    );
+    expect(json(ofType("Discussion"))).toBe(
+      json([
+        {
+          type: "Discussion",
+          createdAt: "2024-01-03T00:00:00Z",
+          title: "discussions title",
+          url: "https://github.com/owner/repo/discussions/1",
+          body: "discussions body",
+          repository: eventRepository,
+        },
+      ]),
+    );
+    expect(json(ofType("PullRequest"))).toBe(
+      json([
+        {
+          type: "PullRequest",
+          createdAt: "2024-01-03T00:00:00Z",
+          title: "pull title",
+          url: "https://github.com/owner/repo/pull/1",
+          body: "pull body",
+          repository: eventRepository,
+        },
+      ]),
+    );
+    const editHistory = [{ editedAt: "2024-01-06T00:00:00Z", deletedAt: null, diff: "old text" }];
+    expect(json(ofType("DiscussionComment"))).toBe(
+      json([
+        {
+          type: "DiscussionComment",
+          createdAt: "2024-01-05T00:00:00Z",
+          discussionTitle: "discussions title",
+          discussionUrl: "https://github.com/owner/repo/discussions/2",
+          body: "discussions comment",
+          url: "https://github.com/owner/repo/discussions/2#comment-1",
+          repository: eventRepository,
+          editHistory,
+        },
+      ]),
+    );
+    expect(json(ofType("PullRequestComment"))).toBe(
+      json([
+        {
+          type: "PullRequestComment",
+          createdAt: "2024-01-05T00:00:00Z",
+          prTitle: "pull title",
+          prUrl: "https://github.com/owner/repo/pull/2",
+          body: "pull comment",
+          url: "https://github.com/owner/repo/pull/2#comment-1",
+          repository: eventRepository,
+          editHistory,
+        },
+      ]),
+    );
   });
 });
