@@ -282,11 +282,35 @@ export class GitHubService {
     // Fetchers run one at a time: GitHub's secondary rate-limit guidance is to
     // avoid concurrent requests, and each fetcher already pages sequentially.
     const fetchers: { label: string; run: () => Promise<GitHubEvent[]> }[] = [
-      { label: "issues", run: () => this.fetchIssues(username) },
+      {
+        label: "issues",
+        run: () =>
+          this.fetchAuthoredItems({
+            type: "Issue",
+            query: ISSUE_SEARCH_QUERY,
+            qualifiers: `author:${username} is:issue`,
+          }),
+      },
       { label: "issue comments", run: () => this.fetchIssueComments(username) },
-      { label: "discussions", run: () => this.fetchDiscussions(username) },
+      {
+        label: "discussions",
+        run: () =>
+          this.fetchAuthoredItems({
+            type: "Discussion",
+            query: DISCUSSION_SEARCH_QUERY,
+            qualifiers: `author:${username} type:discussion`,
+          }),
+      },
       { label: "discussion comments", run: () => this.fetchDiscussionComments(username) },
-      { label: "pull requests", run: () => this.fetchPullRequests(username) },
+      {
+        label: "pull requests",
+        run: () =>
+          this.fetchAuthoredItems({
+            type: "PullRequest",
+            query: PULL_REQUEST_SEARCH_QUERY,
+            qualifiers: `author:${username} is:pr`,
+          }),
+      },
       { label: "pull request comments", run: () => this.fetchPullRequestComments(username) },
       {
         label: "pull request review comments",
@@ -539,181 +563,125 @@ export class GitHubService {
     return comments;
   }
 
-  private async fetchIssues(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<IssueNode>({
-      query: ISSUE_SEARCH_QUERY,
-      qualifiers: `author:${username} is:issue`,
+  // Issues, discussions and pull requests the user opened: a creation-date
+  // search filtered by visibility, with one event per item.
+  private async fetchAuthoredItems(params: {
+    type: "Issue" | "Discussion" | "PullRequest";
+    query: string;
+    qualifiers: string;
+  }): Promise<GitHubEvent[]> {
+    const nodes = await this.searchAllNodes<IssueNode | DiscussionNode | PullRequestNode>({
+      query: params.query,
+      qualifiers: params.qualifiers,
       dateField: "created",
     });
 
-    const events: GitHubEvent[] = [];
+    return nodes
+      .filter((node) => this.matchesVisibility(node.repository.visibility))
+      .map((node) => ({
+        type: params.type,
+        createdAt: node.createdAt,
+        title: node.title,
+        url: node.url,
+        body: node.body,
+        repository: toEventRepository(node.repository),
+      }));
+  }
+
+  // Comments the user left on issues, discussions or pull requests: an
+  // updated-date commenter search, every comment page of each visible item,
+  // and only the user's own comments within the range.
+  private async searchOwnComments<
+    TNode extends IssueWithCommentsNode | DiscussionWithCommentsNode | PullRequestWithCommentsNode,
+  >(params: {
+    username: string;
+    query: string;
+    qualifiers: string;
+    pageQuery: string;
+  }): Promise<{ node: TNode; comment: CommentNode }[]> {
+    const nodes = await this.searchAllNodes<TNode>({
+      query: params.query,
+      qualifiers: params.qualifiers,
+      dateField: "updated",
+    });
+
+    const matches: { node: TNode; comment: CommentNode }[] = [];
     for (const node of nodes) {
-      if (this.matchesVisibility(node.repository.visibility)) {
-        events.push({
-          type: "Issue",
-          createdAt: node.createdAt,
-          title: node.title,
-          url: node.url,
-          body: node.body,
-          repository: toEventRepository(node.repository),
-        });
+      if (!this.matchesVisibility(node.repository.visibility)) continue;
+
+      const comments = await this.fetchAllComments({
+        nodeId: node.id,
+        comments: node.comments,
+        pageQuery: params.pageQuery,
+      });
+      for (const comment of comments) {
+        if (
+          comment.author?.login === params.username &&
+          this.isWithinDateRange(comment.createdAt)
+        ) {
+          matches.push({ node, comment });
+        }
       }
     }
 
-    return events;
+    return matches;
   }
 
   private async fetchIssueComments(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<IssueWithCommentsNode>({
+    const matches = await this.searchOwnComments<IssueWithCommentsNode>({
+      username,
       query: ISSUE_COMMENT_SEARCH_QUERY,
       qualifiers: `commenter:${username} is:issue`,
-      dateField: "updated",
+      pageQuery: ISSUE_COMMENTS_PAGE_QUERY,
     });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (!this.matchesVisibility(node.repository.visibility)) continue;
-
-      const comments = await this.fetchAllComments({
-        nodeId: node.id,
-        comments: node.comments,
-        pageQuery: ISSUE_COMMENTS_PAGE_QUERY,
-      });
-      for (const comment of comments) {
-        if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          events.push({
-            type: "IssueComment",
-            createdAt: comment.createdAt,
-            issueTitle: node.title,
-            issueUrl: node.url,
-            body: comment.body,
-            url: comment.url,
-            repository: toEventRepository(node.repository),
-            ...editHistoryField(comment.userContentEdits),
-          });
-        }
-      }
-    }
-
-    return events;
-  }
-
-  private async fetchDiscussions(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<DiscussionNode>({
-      query: DISCUSSION_SEARCH_QUERY,
-      qualifiers: `author:${username} type:discussion`,
-      dateField: "created",
-    });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (this.matchesVisibility(node.repository.visibility)) {
-        events.push({
-          type: "Discussion",
-          createdAt: node.createdAt,
-          title: node.title,
-          url: node.url,
-          body: node.body,
-          repository: toEventRepository(node.repository),
-        });
-      }
-    }
-
-    return events;
+    return matches.map(({ node, comment }) => ({
+      type: "IssueComment",
+      createdAt: comment.createdAt,
+      issueTitle: node.title,
+      issueUrl: node.url,
+      body: comment.body,
+      url: comment.url,
+      repository: toEventRepository(node.repository),
+      ...editHistoryField(comment.userContentEdits),
+    }));
   }
 
   private async fetchDiscussionComments(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<DiscussionWithCommentsNode>({
+    const matches = await this.searchOwnComments<DiscussionWithCommentsNode>({
+      username,
       query: DISCUSSION_COMMENT_SEARCH_QUERY,
       qualifiers: `commenter:${username} type:discussion`,
-      dateField: "updated",
+      pageQuery: DISCUSSION_COMMENTS_PAGE_QUERY,
     });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (!this.matchesVisibility(node.repository.visibility)) continue;
-
-      const comments = await this.fetchAllComments({
-        nodeId: node.id,
-        comments: node.comments,
-        pageQuery: DISCUSSION_COMMENTS_PAGE_QUERY,
-      });
-      for (const comment of comments) {
-        if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          events.push({
-            type: "DiscussionComment",
-            createdAt: comment.createdAt,
-            discussionTitle: node.title,
-            discussionUrl: node.url,
-            body: comment.body,
-            url: comment.url,
-            repository: toEventRepository(node.repository),
-            ...editHistoryField(comment.userContentEdits),
-          });
-        }
-      }
-    }
-
-    return events;
-  }
-
-  private async fetchPullRequests(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<PullRequestNode>({
-      query: PULL_REQUEST_SEARCH_QUERY,
-      qualifiers: `author:${username} is:pr`,
-      dateField: "created",
-    });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (this.matchesVisibility(node.repository.visibility)) {
-        events.push({
-          type: "PullRequest",
-          createdAt: node.createdAt,
-          title: node.title,
-          url: node.url,
-          body: node.body,
-          repository: toEventRepository(node.repository),
-        });
-      }
-    }
-
-    return events;
+    return matches.map(({ node, comment }) => ({
+      type: "DiscussionComment",
+      createdAt: comment.createdAt,
+      discussionTitle: node.title,
+      discussionUrl: node.url,
+      body: comment.body,
+      url: comment.url,
+      repository: toEventRepository(node.repository),
+      ...editHistoryField(comment.userContentEdits),
+    }));
   }
 
   private async fetchPullRequestComments(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<PullRequestWithCommentsNode>({
+    const matches = await this.searchOwnComments<PullRequestWithCommentsNode>({
+      username,
       query: PULL_REQUEST_COMMENT_SEARCH_QUERY,
       qualifiers: `commenter:${username} is:pr`,
-      dateField: "updated",
+      pageQuery: PULL_REQUEST_COMMENTS_PAGE_QUERY,
     });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (!this.matchesVisibility(node.repository.visibility)) continue;
-
-      const comments = await this.fetchAllComments({
-        nodeId: node.id,
-        comments: node.comments,
-        pageQuery: PULL_REQUEST_COMMENTS_PAGE_QUERY,
-      });
-      for (const comment of comments) {
-        if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          events.push({
-            type: "PullRequestComment",
-            createdAt: comment.createdAt,
-            prTitle: node.title,
-            prUrl: node.url,
-            body: comment.body,
-            url: comment.url,
-            repository: toEventRepository(node.repository),
-            ...editHistoryField(comment.userContentEdits),
-          });
-        }
-      }
-    }
-
-    return events;
+    return matches.map(({ node, comment }) => ({
+      type: "PullRequestComment",
+      createdAt: comment.createdAt,
+      prTitle: node.title,
+      prUrl: node.url,
+      body: comment.body,
+      url: comment.url,
+      repository: toEventRepository(node.repository),
+      ...editHistoryField(comment.userContentEdits),
+    }));
   }
 
   // Mirrors fetchAllComments for the reviews connection of a pull request.
