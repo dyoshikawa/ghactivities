@@ -23,7 +23,6 @@ import type {
   PullRequestWithCommentsNode,
   PullRequestWithReviewsNode,
   PushedRepositoriesResponse,
-  ReleasesConnection,
   ReleasesPageResponse,
   RepositoriesWithReleasesResponse,
   RepositoryNode,
@@ -161,20 +160,21 @@ function editHistoryField(edits: UserContentEditsConnection | null | undefined):
   };
 }
 
-// Yields the nodes of each page of a cursor-paginated connection, starting
-// from the first page. A missing connection (an unknown user or repository)
-// ends the iteration, and breaking out of the consuming loop stops further
-// requests.
-async function* paginate<TNode>(
-  fetchPage: (after: string | null) => Promise<Connection<TNode> | null | undefined>,
-): AsyncGenerator<TNode[]> {
-  let after: string | null = null;
-  for (;;) {
-    const connection = await fetchPage(after);
-    if (!connection) return;
+// Yields the nodes of each page of a cursor-paginated connection: `first`
+// when the first page is already at hand (nested in a parent query),
+// otherwise fetched with a null cursor. A missing connection (an unknown
+// user, repository or node) ends the iteration, and breaking out of the
+// consuming loop stops further requests.
+async function* paginate<TNode>(params: {
+  first?: Connection<TNode>;
+  fetchPage: (after: string | null) => Promise<Connection<TNode> | null | undefined>;
+}): AsyncGenerator<TNode[]> {
+  let connection = params.first ?? (await params.fetchPage(null));
+  while (connection) {
     yield connection.nodes;
-    if (!connection.pageInfo.hasNextPage || connection.pageInfo.endCursor === null) return;
-    after = connection.pageInfo.endCursor;
+    const { hasNextPage, endCursor } = connection.pageInfo;
+    if (!hasNextPage || !endCursor) return;
+    connection = await params.fetchPage(endCursor);
   }
 }
 
@@ -564,20 +564,21 @@ export class GitHubService {
     comments: CommentsConnection;
     pageQuery: string;
   }): Promise<CommentNode[]> {
-    const comments = [...params.comments.nodes];
-    let { hasNextPage, endCursor } = params.comments.pageInfo;
-
-    while (hasNextPage && endCursor) {
-      const response: CommentsPageResponse = await this.execute<CommentsPageResponse>(
-        params.pageQuery,
-        { nodeId: params.nodeId, first: 100, after: endCursor },
-      );
-      const page = response.node?.comments;
-      if (!page) break;
-      comments.push(...page.nodes);
-      ({ hasNextPage, endCursor } = page.pageInfo);
+    const comments: CommentNode[] = [];
+    const commentPages = paginate({
+      first: params.comments,
+      fetchPage: async (after) => {
+        const response = await this.execute<CommentsPageResponse>(params.pageQuery, {
+          nodeId: params.nodeId,
+          first: 100,
+          after,
+        });
+        return response.node?.comments;
+      },
+    });
+    for await (const nodes of commentPages) {
+      comments.push(...nodes);
     }
-
     return comments;
   }
 
@@ -708,20 +709,22 @@ export class GitHubService {
     reviews: ReviewsConnection;
     reviewAuthor: string;
   }): Promise<ReviewNode[]> {
-    const reviews = [...params.reviews.nodes];
-    let { hasNextPage, endCursor } = params.reviews.pageInfo;
-
-    while (hasNextPage && endCursor) {
-      const response: ReviewsPageResponse = await this.execute<ReviewsPageResponse>(
-        REVIEWS_PAGE_QUERY,
-        { nodeId: params.nodeId, first: 25, after: endCursor, reviewAuthor: params.reviewAuthor },
-      );
-      const page = response.node?.reviews;
-      if (!page) break;
-      reviews.push(...page.nodes);
-      ({ hasNextPage, endCursor } = page.pageInfo);
+    const reviews: ReviewNode[] = [];
+    const reviewPages = paginate({
+      first: params.reviews,
+      fetchPage: async (after) => {
+        const response = await this.execute<ReviewsPageResponse>(REVIEWS_PAGE_QUERY, {
+          nodeId: params.nodeId,
+          first: 25,
+          after,
+          reviewAuthor: params.reviewAuthor,
+        });
+        return response.node?.reviews;
+      },
+    });
+    for await (const nodes of reviewPages) {
+      reviews.push(...nodes);
     }
-
     return reviews;
   }
 
@@ -828,13 +831,18 @@ export class GitHubService {
     }
 
     if (this.branches === "all") {
-      const pushedPages = paginate(async (after) => {
-        const response = await this.execute<PushedRepositoriesResponse>(PUSHED_REPOSITORIES_QUERY, {
-          login: username,
-          first: 50,
-          after,
-        });
-        return response.user?.repositories;
+      const pushedPages = paginate({
+        fetchPage: async (after) => {
+          const response = await this.execute<PushedRepositoriesResponse>(
+            PUSHED_REPOSITORIES_QUERY,
+            {
+              login: username,
+              first: 50,
+              after,
+            },
+          );
+          return response.user?.repositories;
+        },
       });
       pages: for await (const nodes of pushedPages) {
         for (const node of nodes) {
@@ -908,14 +916,16 @@ export class GitHubService {
 
   private async listBranches(params: { owner: string; name: string }): Promise<string[]> {
     const branches: string[] = [];
-    const refPages = paginate(async (after) => {
-      const response = await this.execute<BranchRefsResponse>(BRANCH_REFS_QUERY, {
-        owner: params.owner,
-        name: params.name,
-        first: 100,
-        after,
-      });
-      return response.repository?.refs;
+    const refPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<BranchRefsResponse>(BRANCH_REFS_QUERY, {
+          owner: params.owner,
+          name: params.name,
+          first: 100,
+          after,
+        });
+        return response.repository?.refs;
+      },
     });
     for await (const nodes of refPages) {
       branches.push(...nodes.map((node) => node.name));
@@ -1011,13 +1021,15 @@ export class GitHubService {
 
   private async fetchCommitComments(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    const commentPages = paginate(async (after) => {
-      const response = await this.execute<CommitCommentsResponse>(COMMIT_COMMENTS_QUERY, {
-        login: username,
-        first: 100,
-        after,
-      });
-      return response.user?.commitComments;
+    const commentPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<CommitCommentsResponse>(COMMIT_COMMENTS_QUERY, {
+          login: username,
+          first: 100,
+          after,
+        });
+        return response.user?.commitComments;
+      },
     });
 
     // The commitComments connection has no orderBy, so every page is scanned
@@ -1060,13 +1072,15 @@ export class GitHubService {
 
   private async collectGists(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    const gistPages = paginate(async (after) => {
-      const response = await this.execute<GistsResponse>(GISTS_QUERY, {
-        login: username,
-        first: 100,
-        after,
-      });
-      return response.user?.gists;
+    const gistPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<GistsResponse>(GISTS_QUERY, {
+          login: username,
+          first: 100,
+          after,
+        });
+        return response.user?.gists;
+      },
     });
 
     pages: for await (const nodes of gistPages) {
@@ -1108,20 +1122,27 @@ export class GitHubService {
     if (!this.matchesVisibility(repo.visibility)) return [];
 
     const events: GitHubEvent[] = [];
-    let connection: ReleasesConnection = repo.releases;
+    const releasePages = paginate({
+      first: repo.releases,
+      fetchPage: async (after) => {
+        const response = await this.execute<ReleasesPageResponse>(RELEASES_PAGE_QUERY, {
+          owner: repo.owner.login,
+          name: repo.name,
+          first: 25,
+          after,
+        });
+        return response.repository?.releases;
+      },
+    });
 
-    for (;;) {
-      let reachedOlder = false;
-      for (const release of connection.nodes) {
+    pages: for await (const releases of releasePages) {
+      for (const release of releases) {
         // The connection is ordered by creation time, so the early stop must
         // use createdAt; the range check uses the publication time so a
         // release drafted earlier still counts from when it went live.
         // (A release drafted before --since and published inside the range is
         // missed by the early stop; documented in the README.)
-        if (new Date(release.createdAt) < this.since) {
-          reachedOlder = true;
-          break;
-        }
+        if (new Date(release.createdAt) < this.since) break pages;
         if (release.author?.login !== username) continue;
         const releaseTimestamp = release.publishedAt ?? release.createdAt;
         if (!this.isWithinDateRange(releaseTimestamp)) continue;
@@ -1143,21 +1164,6 @@ export class GitHubService {
           repository: toEventRepository(repo),
         });
       }
-
-      if (reachedOlder || !connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
-        break;
-      }
-      const response: ReleasesPageResponse = await this.execute<ReleasesPageResponse>(
-        RELEASES_PAGE_QUERY,
-        {
-          owner: repo.owner.login,
-          name: repo.name,
-          first: 25,
-          after: connection.pageInfo.endCursor,
-        },
-      );
-      if (!response.repository) break;
-      connection = response.repository.releases;
     }
 
     return events;
@@ -1168,12 +1174,14 @@ export class GitHubService {
   // (documented in the README).
   private async fetchReleases(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    const repositoryPages = paginate(async (after) => {
-      const response = await this.execute<RepositoriesWithReleasesResponse>(
-        REPOSITORIES_WITH_RELEASES_QUERY,
-        { login: username, first: 50, after },
-      );
-      return response.user?.repositories;
+    const repositoryPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<RepositoriesWithReleasesResponse>(
+          REPOSITORIES_WITH_RELEASES_QUERY,
+          { login: username, first: 50, after },
+        );
+        return response.user?.repositories;
+      },
     });
 
     for await (const repos of repositoryPages) {
@@ -1187,13 +1195,18 @@ export class GitHubService {
 
   private async fetchCreatedRepositories(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    const repositoryPages = paginate(async (after) => {
-      const response = await this.execute<CreatedRepositoriesResponse>(CREATED_REPOSITORIES_QUERY, {
-        login: username,
-        first: 50,
-        after,
-      });
-      return response.user?.repositories;
+    const repositoryPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<CreatedRepositoriesResponse>(
+          CREATED_REPOSITORIES_QUERY,
+          {
+            login: username,
+            first: 50,
+            after,
+          },
+        );
+        return response.user?.repositories;
+      },
     });
 
     pages: for await (const nodes of repositoryPages) {

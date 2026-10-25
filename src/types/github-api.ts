@@ -241,7 +241,7 @@ interface ReleaseNode {
   };
 }
 
-export type ReleasesConnection = Connection<ReleaseNode>;
+type ReleasesConnection = Connection<ReleaseNode>;
 
 export interface RepositoryWithReleasesNode {
   owner: { login: string };
