@@ -25,6 +25,7 @@ import type {
   ReleasesConnection,
   ReleasesPageResponse,
   RepositoriesWithReleasesResponse,
+  RepositoryNode,
   RepositoryVisibility,
   RepositoryWithReleasesNode,
   RestCommitDetail,
@@ -132,6 +133,14 @@ interface SearchParams {
   qualifiers: string;
   dateField: "created" | "updated";
   extraVariables?: Record<string, unknown>;
+}
+
+function toEventRepository(repository: RepositoryNode): GitHubEvent["repository"] {
+  return {
+    owner: repository.owner.login,
+    name: repository.name,
+    visibility: repository.visibility,
+  };
 }
 
 // Maps a comment's prior revisions to the event's editHistory field;
@@ -543,11 +552,7 @@ export class GitHubService {
           title: node.title,
           url: node.url,
           body: node.body,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
+          repository: toEventRepository(node.repository),
         });
       }
     }
@@ -581,11 +586,7 @@ export class GitHubService {
             issueUrl: node.url,
             body: comment.body,
             url: comment.url,
-            repository: {
-              owner: node.repository.owner.login,
-              name: node.repository.name,
-              visibility: node.repository.visibility,
-            },
+            repository: toEventRepository(node.repository),
             ...(editHistory ? { editHistory } : {}),
           });
         }
@@ -611,11 +612,7 @@ export class GitHubService {
           title: node.title,
           url: node.url,
           body: node.body,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
+          repository: toEventRepository(node.repository),
         });
       }
     }
@@ -649,11 +646,7 @@ export class GitHubService {
             discussionUrl: node.url,
             body: comment.body,
             url: comment.url,
-            repository: {
-              owner: node.repository.owner.login,
-              name: node.repository.name,
-              visibility: node.repository.visibility,
-            },
+            repository: toEventRepository(node.repository),
             ...(editHistory ? { editHistory } : {}),
           });
         }
@@ -679,11 +672,7 @@ export class GitHubService {
           title: node.title,
           url: node.url,
           body: node.body,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
+          repository: toEventRepository(node.repository),
         });
       }
     }
@@ -717,11 +706,7 @@ export class GitHubService {
             prUrl: node.url,
             body: comment.body,
             url: comment.url,
-            repository: {
-              owner: node.repository.owner.login,
-              name: node.repository.name,
-              visibility: node.repository.visibility,
-            },
+            repository: toEventRepository(node.repository),
             ...(editHistory ? { editHistory } : {}),
           });
         }
@@ -770,11 +755,7 @@ export class GitHubService {
     for (const node of nodes) {
       if (!this.matchesVisibility(node.repository.visibility)) continue;
 
-      const repository = {
-        owner: node.repository.owner.login,
-        name: node.repository.name,
-        visibility: node.repository.visibility,
-      };
+      const repository = toEventRepository(node.repository);
 
       const reviews = await this.fetchAllReviews({
         nodeId: node.id,
@@ -1086,11 +1067,7 @@ export class GitHubService {
           body: node.body,
           url: node.url,
           commitOid: node.commit?.oid ?? null,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
+          repository: toEventRepository(node.repository),
           ...(editHistory ? { editHistory } : {}),
         });
       }
@@ -1211,11 +1188,7 @@ export class GitHubService {
             size: asset.size,
             contentType: asset.contentType,
           })),
-          repository: {
-            owner: repo.owner.login,
-            name: repo.name,
-            visibility: repo.visibility,
-          },
+          repository: toEventRepository(repo),
         });
       }
 
@@ -1300,11 +1273,7 @@ export class GitHubService {
           description: node.description,
           isFork: node.isFork,
           readme: node.object?.text ?? null,
-          repository: {
-            owner: node.owner.login,
-            name: node.name,
-            visibility: node.visibility,
-          },
+          repository: toEventRepository(node),
         });
       }
 

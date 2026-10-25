@@ -18,7 +18,7 @@ export interface SearchResponse<TNode> {
   search: SearchConnection<TNode>;
 }
 
-interface RepositoryNode {
+export interface RepositoryNode {
   owner: { login: string };
   name: string;
   visibility: RepositoryVisibility;
