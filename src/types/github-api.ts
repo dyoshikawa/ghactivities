@@ -7,6 +7,12 @@ interface PageInfo {
   endCursor: string | null;
 }
 
+/** One page of a cursor-paginated GraphQL connection. */
+export interface Connection<TNode> {
+  pageInfo: PageInfo;
+  nodes: TNode[];
+}
+
 interface SearchConnection<TNode> {
   issueCount?: number;
   discussionCount?: number;
@@ -50,10 +56,7 @@ export interface CommentNode {
   userContentEdits: UserContentEditsConnection | null;
 }
 
-export interface CommentsConnection {
-  pageInfo: PageInfo;
-  nodes: CommentNode[];
-}
+export type CommentsConnection = Connection<CommentNode>;
 
 export interface CommentsPageResponse {
   node: { comments: CommentsConnection } | null;
@@ -114,10 +117,7 @@ export interface ReviewNode {
   userContentEdits: UserContentEditsConnection | null;
 }
 
-export interface ReviewsConnection {
-  pageInfo: PageInfo;
-  nodes: ReviewNode[];
-}
+export type ReviewsConnection = Connection<ReviewNode>;
 
 export interface ReviewsPageResponse {
   node: { reviews: ReviewsConnection } | null;
@@ -161,10 +161,7 @@ export interface CommitHistoryResponse {
     defaultBranchRef: {
       name: string;
       target: {
-        history: {
-          pageInfo: PageInfo;
-          nodes: CommitHistoryNode[];
-        };
+        history: Connection<CommitHistoryNode>;
       };
     } | null;
   };
@@ -172,10 +169,7 @@ export interface CommitHistoryResponse {
 
 export interface BranchRefsResponse {
   repository: {
-    refs: {
-      pageInfo: PageInfo;
-      nodes: { name: string }[];
-    };
+    refs: Connection<{ name: string }>;
   } | null;
 }
 
@@ -183,10 +177,7 @@ export interface BranchCommitHistoryResponse {
   repository: {
     ref: {
       target: {
-        history: {
-          pageInfo: PageInfo;
-          nodes: CommitHistoryNode[];
-        };
+        history: Connection<CommitHistoryNode>;
       } | null;
     } | null;
   } | null;
@@ -210,10 +201,7 @@ interface GistNode {
 
 export interface GistsResponse {
   user: {
-    gists: {
-      pageInfo: PageInfo;
-      nodes: GistNode[];
-    };
+    gists: Connection<GistNode>;
   } | null;
 }
 
@@ -228,10 +216,7 @@ interface CommitCommentNode {
 
 export interface CommitCommentsResponse {
   user: {
-    commitComments: {
-      pageInfo: PageInfo;
-      nodes: CommitCommentNode[];
-    };
+    commitComments: Connection<CommitCommentNode>;
   } | null;
 }
 
@@ -256,10 +241,7 @@ interface ReleaseNode {
   };
 }
 
-export interface ReleasesConnection {
-  pageInfo: PageInfo;
-  nodes: ReleaseNode[];
-}
+export type ReleasesConnection = Connection<ReleaseNode>;
 
 export interface RepositoryWithReleasesNode {
   owner: { login: string };
@@ -270,10 +252,7 @@ export interface RepositoryWithReleasesNode {
 
 export interface RepositoriesWithReleasesResponse {
   user: {
-    repositories: {
-      pageInfo: PageInfo;
-      nodes: RepositoryWithReleasesNode[];
-    };
+    repositories: Connection<RepositoryWithReleasesNode>;
   } | null;
 }
 
@@ -296,10 +275,7 @@ interface CreatedRepositoryNode {
 
 export interface CreatedRepositoriesResponse {
   user: {
-    repositories: {
-      pageInfo: PageInfo;
-      nodes: CreatedRepositoryNode[];
-    };
+    repositories: Connection<CreatedRepositoryNode>;
   } | null;
 }
 
@@ -312,10 +288,7 @@ interface PushedRepositoryNode {
 
 export interface PushedRepositoriesResponse {
   user: {
-    repositories: {
-      pageInfo: PageInfo;
-      nodes: PushedRepositoryNode[];
-    };
+    repositories: Connection<PushedRepositoryNode>;
   } | null;
 }
 

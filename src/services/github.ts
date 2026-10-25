@@ -11,6 +11,7 @@ import type {
   CommitCommentsResponse,
   CommitHistoryNode,
   CommitHistoryResponse,
+  Connection,
   ContributionsCollectionResponse,
   CreatedRepositoriesResponse,
   DiscussionNode,
@@ -158,6 +159,23 @@ function editHistoryField(edits: UserContentEditsConnection | null | undefined):
       diff: edit.diff,
     })),
   };
+}
+
+// Yields the nodes of each page of a cursor-paginated connection, starting
+// from the first page. A missing connection (an unknown user or repository)
+// ends the iteration, and breaking out of the consuming loop stops further
+// requests.
+async function* paginate<TNode>(
+  fetchPage: (after: string | null) => Promise<Connection<TNode> | null | undefined>,
+): AsyncGenerator<TNode[]> {
+  let after: string | null = null;
+  for (;;) {
+    const connection = await fetchPage(after);
+    if (!connection) return;
+    yield connection.nodes;
+    if (!connection.pageInfo.hasNextPage || connection.pageInfo.endCursor === null) return;
+    after = connection.pageInfo.endCursor;
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -810,38 +828,25 @@ export class GitHubService {
     }
 
     if (this.branches === "all") {
-      let after: string | null = null;
-      let hasNext = true;
-      while (hasNext) {
-        const response: PushedRepositoriesResponse = await this.execute<PushedRepositoriesResponse>(
-          PUSHED_REPOSITORIES_QUERY,
-          {
-            login: username,
-            first: 50,
-            after,
-          },
-        );
-        const connection = response.user?.repositories;
-        if (!connection) break;
-        let reachedOlder = false;
-        for (const node of connection.nodes) {
+      const pushedPages = paginate(async (after) => {
+        const response = await this.execute<PushedRepositoriesResponse>(PUSHED_REPOSITORIES_QUERY, {
+          login: username,
+          first: 50,
+          after,
+        });
+        return response.user?.repositories;
+      });
+      pages: for await (const nodes of pushedPages) {
+        for (const node of nodes) {
           // The ordering of never-pushed repositories under PUSHED_AT DESC is
           // not specified, so a null pushedAt is skipped rather than treated
           // as an early-stop signal.
           if (node.pushedAt === null) continue;
-          if (new Date(node.pushedAt) < this.since) {
-            reachedOlder = true;
-            break;
-          }
+          if (new Date(node.pushedAt) < this.since) break pages;
           if (this.matchesVisibility(node.visibility)) {
             repoMap.set(`${node.owner.login}/${node.name}`, node.visibility);
           }
         }
-        hasNext =
-          !reachedOlder &&
-          connection.pageInfo.hasNextPage &&
-          connection.pageInfo.endCursor !== null;
-        after = connection.pageInfo.endCursor;
       }
     }
 
@@ -872,10 +877,7 @@ export class GitHubService {
         authorId: params.authorId,
       };
 
-      let history: {
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
-        nodes: CommitHistoryNode[];
-      };
+      let history: Connection<CommitHistoryNode>;
       if (params.branch === null) {
         const response: CommitHistoryResponse = await this.execute<CommitHistoryResponse>(
           COMMIT_HISTORY_QUERY,
@@ -906,18 +908,17 @@ export class GitHubService {
 
   private async listBranches(params: { owner: string; name: string }): Promise<string[]> {
     const branches: string[] = [];
-    let after: string | null = null;
-    let hasNext = true;
-    while (hasNext) {
-      const response: BranchRefsResponse = await this.execute<BranchRefsResponse>(
-        BRANCH_REFS_QUERY,
-        { owner: params.owner, name: params.name, first: 100, after },
-      );
-      const refs = response.repository?.refs;
-      if (!refs) break;
-      branches.push(...refs.nodes.map((node) => node.name));
-      hasNext = refs.pageInfo.hasNextPage && refs.pageInfo.endCursor !== null;
-      after = refs.pageInfo.endCursor;
+    const refPages = paginate(async (after) => {
+      const response = await this.execute<BranchRefsResponse>(BRANCH_REFS_QUERY, {
+        owner: params.owner,
+        name: params.name,
+        first: 100,
+        after,
+      });
+      return response.repository?.refs;
+    });
+    for await (const nodes of refPages) {
+      branches.push(...nodes.map((node) => node.name));
     }
     return branches;
   }
@@ -1010,20 +1011,19 @@ export class GitHubService {
 
   private async fetchCommitComments(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const commentPages = paginate(async (after) => {
+      const response = await this.execute<CommitCommentsResponse>(COMMIT_COMMENTS_QUERY, {
+        login: username,
+        first: 100,
+        after,
+      });
+      return response.user?.commitComments;
+    });
 
     // The commitComments connection has no orderBy, so every page is scanned
     // and filtered by the date range.
-    while (hasNext) {
-      const response: CommitCommentsResponse = await this.execute<CommitCommentsResponse>(
-        COMMIT_COMMENTS_QUERY,
-        { login: username, first: 100, after },
-      );
-      const connection = response.user?.commitComments;
-      if (!connection) break;
-
-      for (const node of connection.nodes) {
+    for await (const nodes of commentPages) {
+      for (const node of nodes) {
         if (!this.matchesVisibility(node.repository.visibility)) continue;
         if (!this.isWithinDateRange(node.createdAt)) continue;
         events.push({
@@ -1036,9 +1036,6 @@ export class GitHubService {
           ...editHistoryField(node.userContentEdits),
         });
       }
-
-      hasNext = connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
@@ -1063,26 +1060,20 @@ export class GitHubService {
 
   private async collectGists(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
-
-    while (hasNext) {
-      const response: GistsResponse = await this.execute<GistsResponse>(GISTS_QUERY, {
+    const gistPages = paginate(async (after) => {
+      const response = await this.execute<GistsResponse>(GISTS_QUERY, {
         login: username,
         first: 100,
         after,
       });
-      const connection = response.user?.gists;
-      if (!connection) break;
+      return response.user?.gists;
+    });
 
-      // Newest first: everything after the first gist older than --since is
-      // out of range too.
-      let reachedOlder = false;
-      for (const node of connection.nodes) {
-        if (new Date(node.createdAt) < this.since) {
-          reachedOlder = true;
-          break;
-        }
+    pages: for await (const nodes of gistPages) {
+      for (const node of nodes) {
+        // Newest first: everything after the first gist older than --since is
+        // out of range too.
+        if (new Date(node.createdAt) < this.since) break pages;
         // Secret gists group with private repositories.
         const visibility: RepositoryVisibility = node.isPublic ? "PUBLIC" : "PRIVATE";
         if (!this.matchesVisibility(visibility)) continue;
@@ -1102,10 +1093,6 @@ export class GitHubService {
           },
         });
       }
-
-      hasNext =
-        !reachedOlder && connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
@@ -1181,25 +1168,18 @@ export class GitHubService {
   // (documented in the README).
   private async fetchReleases(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const repositoryPages = paginate(async (after) => {
+      const response = await this.execute<RepositoriesWithReleasesResponse>(
+        REPOSITORIES_WITH_RELEASES_QUERY,
+        { login: username, first: 50, after },
+      );
+      return response.user?.repositories;
+    });
 
-    while (hasNext) {
-      const response: RepositoriesWithReleasesResponse =
-        await this.execute<RepositoriesWithReleasesResponse>(REPOSITORIES_WITH_RELEASES_QUERY, {
-          login: username,
-          first: 50,
-          after,
-        });
-      const connection = response.user?.repositories;
-      if (!connection) break;
-
-      for (const repo of connection.nodes) {
+    for await (const repos of repositoryPages) {
+      for (const repo of repos) {
         events.push(...(await this.collectRepositoryReleases({ repo, username })));
       }
-
-      hasNext = connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
@@ -1207,28 +1187,19 @@ export class GitHubService {
 
   private async fetchCreatedRepositories(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const repositoryPages = paginate(async (after) => {
+      const response = await this.execute<CreatedRepositoriesResponse>(CREATED_REPOSITORIES_QUERY, {
+        login: username,
+        first: 50,
+        after,
+      });
+      return response.user?.repositories;
+    });
 
-    while (hasNext) {
-      const response: CreatedRepositoriesResponse = await this.execute<CreatedRepositoriesResponse>(
-        CREATED_REPOSITORIES_QUERY,
-        {
-          login: username,
-          first: 50,
-          after,
-        },
-      );
-      const connection = response.user?.repositories;
-      if (!connection) break;
-
-      // Newest first: stop at the first repository created before --since.
-      let reachedOlder = false;
-      for (const node of connection.nodes) {
-        if (new Date(node.createdAt) < this.since) {
-          reachedOlder = true;
-          break;
-        }
+    pages: for await (const nodes of repositoryPages) {
+      for (const node of nodes) {
+        // Newest first: stop at the first repository created before --since.
+        if (new Date(node.createdAt) < this.since) break pages;
         if (!this.matchesVisibility(node.visibility)) continue;
         if (!this.isWithinDateRange(node.createdAt)) continue;
         events.push({
@@ -1241,10 +1212,6 @@ export class GitHubService {
           repository: toEventRepository(node),
         });
       }
-
-      hasNext =
-        !reachedOlder && connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
