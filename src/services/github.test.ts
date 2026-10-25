@@ -24,6 +24,7 @@ const {
   releaseRepoNodes,
   createdRepoNodes,
   pushedRepoNodes,
+  connectionPages,
   restCalls,
   restResponsesByPath,
   restFailureQueue,
@@ -51,6 +52,9 @@ const {
   releaseRepoNodes: [] as unknown[],
   createdRepoNodes: [] as unknown[],
   pushedRepoNodes: [] as unknown[],
+  // Multi-page user/repository connections, keyed by "<kind>:<after cursor>"
+  // ("" for the first page). Unset kinds fall back to the single-page lists.
+  connectionPages: new Map<string, { pageInfo: unknown; nodes: unknown[] }>(),
   restCalls: [] as string[],
   restResponsesByPath: new Map<string, unknown>(),
   // Each entry makes the next REST call fail with the given status and body.
@@ -102,6 +106,12 @@ vi.mock("@octokit/graphql", () => {
 
   const noNextPage = { hasNextPage: false, endCursor: null };
 
+  const connection = (kind: string, variables: Record<string, unknown>, nodes: unknown[]) =>
+    connectionPages.get(`${kind}:${String(variables.after ?? "")}`) ?? {
+      pageInfo: noNextPage,
+      nodes,
+    };
+
   const impl = (query: string, variables: Record<string, unknown> = {}) => {
     calls.push({ query, variables });
 
@@ -121,7 +131,7 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("refs(refPrefix:")) {
       return Promise.resolve({
-        repository: { refs: { pageInfo: noNextPage, nodes: branchRefNodes } },
+        repository: { refs: connection("refs", variables, branchRefNodes) },
       });
     }
     if (query.includes("ref(qualifiedName:")) {
@@ -145,12 +155,12 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("gists(")) {
       return Promise.resolve({
-        user: { gists: { pageInfo: noNextPage, nodes: gistNodes } },
+        user: { gists: connection("gists", variables, gistNodes) },
       });
     }
     if (query.includes("commitComments(")) {
       return Promise.resolve({
-        user: { commitComments: { pageInfo: noNextPage, nodes: commitCommentNodes } },
+        user: { commitComments: connection("commitComments", variables, commitCommentNodes) },
       });
     }
     // The per-repository releases page query selects repository { releases };
@@ -162,17 +172,17 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("releases(")) {
       return Promise.resolve({
-        user: { repositories: { pageInfo: noNextPage, nodes: releaseRepoNodes } },
+        user: { repositories: connection("releaseRepos", variables, releaseRepoNodes) },
       });
     }
     if (query.includes("pushedAt")) {
       return Promise.resolve({
-        user: { repositories: { pageInfo: noNextPage, nodes: pushedRepoNodes } },
+        user: { repositories: connection("pushedRepos", variables, pushedRepoNodes) },
       });
     }
     if (query.includes("isFork")) {
       return Promise.resolve({
-        user: { repositories: { pageInfo: noNextPage, nodes: createdRepoNodes } },
+        user: { repositories: connection("createdRepos", variables, createdRepoNodes) },
       });
     }
     if (query.includes("node(id:")) {
@@ -240,6 +250,7 @@ beforeEach(() => {
   releaseRepoNodes.length = 0;
   createdRepoNodes.length = 0;
   pushedRepoNodes.length = 0;
+  connectionPages.clear();
   restCalls.length = 0;
   restResponsesByPath.clear();
   restFailureQueue.length = 0;
@@ -1784,5 +1795,159 @@ describe("search-based event shapes", () => {
         },
       ]),
     );
+  });
+});
+
+const connectionPage = (nodes: unknown[], endCursor: string | null) => ({
+  pageInfo: { hasNextPage: endCursor !== null, endCursor },
+  nodes,
+});
+
+const gistNode = (name: string, createdAt: string) => ({
+  name,
+  description: null,
+  url: `https://gist.github.com/testuser/${name}`,
+  createdAt,
+  isPublic: true,
+  files: [],
+});
+
+const createdRepo = (name: string, createdAt: string) => ({
+  owner: { login: "testuser" },
+  name,
+  visibility: "PUBLIC",
+  url: `https://github.com/testuser/${name}`,
+  description: null,
+  createdAt,
+  isFork: false,
+  object: null,
+});
+
+const releaseRepo = (name: string) => ({
+  owner: { login: "testuser" },
+  name,
+  visibility: "PUBLIC",
+  releases: connectionPage(
+    [
+      {
+        name: `${name} release`,
+        tagName: "v1",
+        url: `https://github.com/testuser/${name}/releases/tag/v1`,
+        createdAt: "2024-01-05T00:00:00Z",
+        publishedAt: "2024-01-05T00:00:00Z",
+        description: null,
+        isPrerelease: false,
+        isDraft: false,
+        author: { login: "testuser" },
+        releaseAssets: { nodes: [] },
+      },
+    ],
+    null,
+  ),
+});
+
+const pushedRepo = (name: string, pushedAt: string) => ({
+  owner: { login: "testuser" },
+  name,
+  visibility: "PUBLIC",
+  pushedAt,
+});
+
+describe("connection pagination", () => {
+  const repoNode = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
+  const afterCursors = (marker: string) =>
+    calls.filter((call) => call.query.includes(marker)).map((call) => call.variables.after);
+
+  it("pages gists and stops at the first one older than --since", async () => {
+    connectionPages.set("gists:", connectionPage([gistNode("g1", "2024-01-10T00:00:00Z")], "G2"));
+    connectionPages.set(
+      "gists:G2",
+      connectionPage(
+        [gistNode("g2", "2024-01-05T00:00:00Z"), gistNode("g0", "2023-12-01T00:00:00Z")],
+        "G3",
+      ),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "Gist").map((event) => event.repository.name),
+    ).toEqual(["g1", "g2"]);
+    expect(afterCursors("gists(")).toEqual([null, "G2"]);
+  });
+
+  it("pages every commit comment page", async () => {
+    const comment = (body: string) => ({
+      body,
+      url: `https://github.com/owner/repo/commit/abc#${body}`,
+      createdAt: "2024-01-05T00:00:00Z",
+      commit: { oid: "abc" },
+      repository: repoNode,
+      userContentEdits: null,
+    });
+    connectionPages.set("commitComments:", connectionPage([comment("c1")], "C2"));
+    connectionPages.set("commitComments:C2", connectionPage([comment("c2")], null));
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "CommitComment").map((event) => event.body),
+    ).toEqual(["c1", "c2"]);
+    expect(afterCursors("commitComments(")).toEqual([null, "C2"]);
+  });
+
+  it("pages created repositories and stops at the first one older than --since", async () => {
+    connectionPages.set(
+      "createdRepos:",
+      connectionPage([createdRepo("r1", "2024-01-10T00:00:00Z")], "R2"),
+    );
+    connectionPages.set(
+      "createdRepos:R2",
+      connectionPage(
+        [createdRepo("r2", "2024-01-05T00:00:00Z"), createdRepo("r0", "2023-01-01T00:00:00Z")],
+        "R3",
+      ),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "Repository").map((event) => event.repository.name),
+    ).toEqual(["r1", "r2"]);
+    expect(afterCursors("isFork")).toEqual([null, "R2"]);
+  });
+
+  it("pages the owned repositories walked for releases", async () => {
+    connectionPages.set("releaseRepos:", connectionPage([releaseRepo("a")], "P2"));
+    connectionPages.set("releaseRepos:P2", connectionPage([releaseRepo("b")], null));
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "Release").map((event) => event.repository.name),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("pages pushed repositories and branches with --branches all", async () => {
+    connectionPages.set(
+      "pushedRepos:",
+      connectionPage([pushedRepo("fresh", "2024-01-10T00:00:00Z")], "U2"),
+    );
+    connectionPages.set(
+      "pushedRepos:U2",
+      connectionPage([pushedRepo("stale", "2023-01-01T00:00:00Z")], "U3"),
+    );
+    connectionPages.set("refs:", connectionPage([{ name: "main" }], "B2"));
+    connectionPages.set("refs:B2", connectionPage([{ name: "feature" }], null));
+
+    await makeService({ branches: "all" }).fetchAllEvents();
+
+    expect(afterCursors("pushedAt")).toEqual([null, "U2"]);
+    const historyCalls = calls.filter((call) => call.query.includes("ref(qualifiedName:"));
+    expect(
+      historyCalls.map(
+        (call) => `${String(call.variables.name)} ${String(call.variables.qualifiedName)}`,
+      ),
+    ).toEqual(["fresh refs/heads/main", "fresh refs/heads/feature"]);
   });
 });
