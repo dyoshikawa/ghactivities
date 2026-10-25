@@ -143,18 +143,21 @@ function toEventRepository(repository: RepositoryNode): GitHubEvent["repository"
   };
 }
 
-// Maps a comment's prior revisions to the event's editHistory field;
-// undefined (field omitted) when the comment was never edited.
-function toEditHistory(
-  edits: UserContentEditsConnection | null | undefined,
-): ContentEdit[] | undefined {
+// Maps a comment's prior revisions to the event's editHistory field, ready to
+// spread into the event; the field is omitted when the comment was never
+// edited.
+function editHistoryField(edits: UserContentEditsConnection | null | undefined): {
+  editHistory?: ContentEdit[];
+} {
   const nodes = edits?.nodes ?? [];
-  if (nodes.length === 0) return undefined;
-  return nodes.map((edit) => ({
-    editedAt: edit.editedAt,
-    deletedAt: edit.deletedAt,
-    diff: edit.diff,
-  }));
+  if (nodes.length === 0) return {};
+  return {
+    editHistory: nodes.map((edit) => ({
+      editedAt: edit.editedAt,
+      deletedAt: edit.deletedAt,
+      diff: edit.diff,
+    })),
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -578,7 +581,6 @@ export class GitHubService {
       });
       for (const comment of comments) {
         if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          const editHistory = toEditHistory(comment.userContentEdits);
           events.push({
             type: "IssueComment",
             createdAt: comment.createdAt,
@@ -587,7 +589,7 @@ export class GitHubService {
             body: comment.body,
             url: comment.url,
             repository: toEventRepository(node.repository),
-            ...(editHistory ? { editHistory } : {}),
+            ...editHistoryField(comment.userContentEdits),
           });
         }
       }
@@ -638,7 +640,6 @@ export class GitHubService {
       });
       for (const comment of comments) {
         if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          const editHistory = toEditHistory(comment.userContentEdits);
           events.push({
             type: "DiscussionComment",
             createdAt: comment.createdAt,
@@ -647,7 +648,7 @@ export class GitHubService {
             body: comment.body,
             url: comment.url,
             repository: toEventRepository(node.repository),
-            ...(editHistory ? { editHistory } : {}),
+            ...editHistoryField(comment.userContentEdits),
           });
         }
       }
@@ -698,7 +699,6 @@ export class GitHubService {
       });
       for (const comment of comments) {
         if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          const editHistory = toEditHistory(comment.userContentEdits);
           events.push({
             type: "PullRequestComment",
             createdAt: comment.createdAt,
@@ -707,7 +707,7 @@ export class GitHubService {
             body: comment.body,
             url: comment.url,
             repository: toEventRepository(node.repository),
-            ...(editHistory ? { editHistory } : {}),
+            ...editHistoryField(comment.userContentEdits),
           });
         }
       }
@@ -772,7 +772,6 @@ export class GitHubService {
         // A review drafted earlier counts from its submission time.
         const reviewTimestamp = review.submittedAt ?? review.createdAt;
         if (review.body !== "" && this.isWithinDateRange(reviewTimestamp)) {
-          const editHistory = toEditHistory(review.userContentEdits);
           events.push({
             type: "PullRequestReviewComment",
             createdAt: reviewTimestamp,
@@ -781,7 +780,7 @@ export class GitHubService {
             body: review.body,
             url: review.url,
             repository,
-            ...(editHistory ? { editHistory } : {}),
+            ...editHistoryField(review.userContentEdits),
           });
         }
 
@@ -792,7 +791,6 @@ export class GitHubService {
         });
         for (const comment of comments) {
           if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-            const editHistory = toEditHistory(comment.userContentEdits);
             events.push({
               type: "PullRequestReviewComment",
               createdAt: comment.createdAt,
@@ -801,7 +799,7 @@ export class GitHubService {
               body: comment.body,
               url: comment.url,
               repository,
-              ...(editHistory ? { editHistory } : {}),
+              ...editHistoryField(comment.userContentEdits),
             });
           }
         }
@@ -1060,7 +1058,6 @@ export class GitHubService {
       for (const node of connection.nodes) {
         if (!this.matchesVisibility(node.repository.visibility)) continue;
         if (!this.isWithinDateRange(node.createdAt)) continue;
-        const editHistory = toEditHistory(node.userContentEdits);
         events.push({
           type: "CommitComment",
           createdAt: node.createdAt,
@@ -1068,7 +1065,7 @@ export class GitHubService {
           url: node.url,
           commitOid: node.commit?.oid ?? null,
           repository: toEventRepository(node.repository),
-          ...(editHistory ? { editHistory } : {}),
+          ...editHistoryField(node.userContentEdits),
         });
       }
 
