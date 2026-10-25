@@ -2,12 +2,12 @@
 // organization-internal repositories on GitHub Enterprise.
 export type RepositoryVisibility = "PUBLIC" | "PRIVATE" | "INTERNAL";
 
-export interface PageInfo {
+interface PageInfo {
   hasNextPage: boolean;
   endCursor: string | null;
 }
 
-export interface SearchConnection<TNode> {
+interface SearchConnection<TNode> {
   issueCount?: number;
   discussionCount?: number;
   pageInfo: PageInfo;
@@ -18,7 +18,7 @@ export interface SearchResponse<TNode> {
   search: SearchConnection<TNode>;
 }
 
-export interface RepositoryNode {
+interface RepositoryNode {
   owner: { login: string };
   name: string;
   visibility: RepositoryVisibility;
@@ -32,9 +32,7 @@ export interface IssueNode {
   repository: RepositoryNode;
 }
 
-export type IssueSearchResponse = SearchResponse<IssueNode>;
-
-export interface UserContentEditNode {
+interface UserContentEditNode {
   editedAt: string;
   deletedAt: string | null;
   diff: string | null;
@@ -70,8 +68,6 @@ export interface IssueWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export type IssueCommentSearchResponse = SearchResponse<IssueWithCommentsNode>;
-
 export interface DiscussionNode {
   title: string;
   url: string;
@@ -79,8 +75,6 @@ export interface DiscussionNode {
   createdAt: string;
   repository: RepositoryNode;
 }
-
-export type DiscussionSearchResponse = SearchResponse<DiscussionNode>;
 
 export interface DiscussionWithCommentsNode {
   id: string;
@@ -91,8 +85,6 @@ export interface DiscussionWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export type DiscussionCommentSearchResponse = SearchResponse<DiscussionWithCommentsNode>;
-
 export interface PullRequestNode {
   title: string;
   url: string;
@@ -100,8 +92,6 @@ export interface PullRequestNode {
   createdAt: string;
   repository: RepositoryNode;
 }
-
-export type PullRequestSearchResponse = SearchResponse<PullRequestNode>;
 
 export interface PullRequestWithCommentsNode {
   id: string;
@@ -142,9 +132,7 @@ export interface PullRequestWithReviewsNode {
   reviews: ReviewsConnection;
 }
 
-export type PullRequestCommentSearchResponse = SearchResponse<PullRequestWithCommentsNode>;
-
-export interface CommitContributionNode {
+interface CommitContributionNode {
   occurredAt: string;
   repository: {
     owner: { login: string };
@@ -218,7 +206,7 @@ export interface BranchCommitHistoryResponse {
   } | null;
 }
 
-export interface GistNode {
+interface GistNode {
   name: string;
   description: string | null;
   url: string;
@@ -243,7 +231,7 @@ export interface GistsResponse {
   } | null;
 }
 
-export interface CommitCommentNode {
+interface CommitCommentNode {
   body: string;
   url: string;
   createdAt: string;
@@ -261,7 +249,7 @@ export interface CommitCommentsResponse {
   } | null;
 }
 
-export interface ReleaseNode {
+interface ReleaseNode {
   name: string | null;
   tagName: string;
   url: string;
@@ -309,7 +297,7 @@ export interface ReleasesPageResponse {
   } | null;
 }
 
-export interface CreatedRepositoryNode {
+interface CreatedRepositoryNode {
   owner: { login: string };
   name: string;
   visibility: RepositoryVisibility;
@@ -329,7 +317,7 @@ export interface CreatedRepositoriesResponse {
   } | null;
 }
 
-export interface PushedRepositoryNode {
+interface PushedRepositoryNode {
   owner: { login: string };
   name: string;
   visibility: RepositoryVisibility;
