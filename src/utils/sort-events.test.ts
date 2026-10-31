@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import type { GitHubEvent } from "../types/events.js";
-
 import { sortEvents } from "./sort-events.js";
 
 const makeEvent = (createdAt: string): GitHubEvent => ({

@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import { runCli, useTestDirectory } from "./e2e-helper.js";

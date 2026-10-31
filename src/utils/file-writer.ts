@@ -2,7 +2,6 @@ import { writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
 import type { GitHubEvent } from "../types/events.js";
-
 import { countTokens } from "./count-tokens.js";
 
 function exceedsLimit(params: {

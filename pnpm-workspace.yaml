@@ -12,6 +12,3 @@ minimumReleaseAgeExclude:
   - "@ai-sdk/openai@4.0.9"
   - "@ai-sdk/provider-utils@5.0.6"
   - ai@7.0.18
-overrides:
-  # oxfmt 0.28.0 pins tinypool 2.1.0, which has known advisories fixed in 2.1.2.
-  tinypool@2.1.0: 2.1.2

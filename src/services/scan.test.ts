@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import type { ScanProvider } from "../types/scan.js";
-
 import { buildModel, MAX_SCAN_INPUT_TOKENS, scanActivities } from "./scan.js";
 
 describe("buildModel", () => {
