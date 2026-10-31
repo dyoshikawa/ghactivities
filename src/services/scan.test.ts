@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import type { ScanProvider } from "../types/scan.js";
 import { buildModel, MAX_SCAN_INPUT_TOKENS, scanActivities } from "./scan.js";

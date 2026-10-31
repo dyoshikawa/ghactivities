@@ -222,3 +222,4 @@ rulesync.local.jsonc
 **/.opencode/plugins/rulesync-hooks.js
 !.rulesync/.aiignore
 # End of Rulesync
+.vitest/
