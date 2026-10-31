@@ -53,46 +53,49 @@ const {
   restFailureQueue: [] as { status: number; body: unknown }[],
 }));
 
+// Helpers of the @octokit/graphql stub below. They are function declarations
+// so that they are hoisted along with the (hoisted) vi.mock factory that
+// calls them.
+function findInjectedFailure(query: string, variables: Record<string, unknown>) {
+  const failureKey = `${query} ${String(variables.searchQuery ?? "")} after:${String(variables.after ?? "")}`;
+  for (const [substring, errors] of failures) {
+    if (errors.length > 0 && failureKey.includes(substring)) {
+      return errors.shift();
+    }
+  }
+  return undefined;
+}
+
+// Nested pagination: serves the review or comment page registered for the
+// requested cursor.
+function handleNodePage(query: string, variables: Record<string, unknown>) {
+  if (query.includes("reviews(first:")) {
+    const page = reviewPagesByCursor.get(String(variables.after ?? ""));
+    return { node: page ? { reviews: page } : null };
+  }
+  const page = commentPagesByCursor.get(String(variables.after ?? ""));
+  return { node: page ? { comments: page } : null };
+}
+
+function handleSearch(variables: Record<string, unknown>) {
+  const searchQuery = String(variables.searchQuery ?? "");
+  const preset = searchResponsesByQuery.get(searchQuery);
+  if (preset) return { search: preset };
+  let nodes: unknown[] = [];
+  if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
+    nodes = issueCommentSearchNodes;
+  }
+  if (searchQuery.includes("reviewed-by:")) {
+    nodes = reviewSearchNodes;
+  }
+  return {
+    search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+  };
+}
+
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
 // each query the service issues, and records the (query, variables) pairs.
 vi.mock("@octokit/graphql", () => {
-  const findInjectedFailure = (query: string, variables: Record<string, unknown>) => {
-    const failureKey = `${query} ${String(variables.searchQuery ?? "")} after:${String(variables.after ?? "")}`;
-    for (const [substring, errors] of failures) {
-      if (errors.length > 0 && failureKey.includes(substring)) {
-        return errors.shift();
-      }
-    }
-    return undefined;
-  };
-
-  // Nested pagination: serves the review or comment page registered for the
-  // requested cursor.
-  const handleNodePage = (query: string, variables: Record<string, unknown>) => {
-    if (query.includes("reviews(first:")) {
-      const page = reviewPagesByCursor.get(String(variables.after ?? ""));
-      return { node: page ? { reviews: page } : null };
-    }
-    const page = commentPagesByCursor.get(String(variables.after ?? ""));
-    return { node: page ? { comments: page } : null };
-  };
-
-  const handleSearch = (variables: Record<string, unknown>) => {
-    const searchQuery = String(variables.searchQuery ?? "");
-    const preset = searchResponsesByQuery.get(searchQuery);
-    if (preset) return { search: preset };
-    let nodes: unknown[] = [];
-    if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
-      nodes = issueCommentSearchNodes;
-    }
-    if (searchQuery.includes("reviewed-by:")) {
-      nodes = reviewSearchNodes;
-    }
-    return {
-      search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes },
-    };
-  };
-
   const noNextPage = { hasNextPage: false, endCursor: null };
 
   const impl = (query: string, variables: Record<string, unknown> = {}) => {
@@ -666,25 +669,25 @@ const visibilityNode = (visibility: string) => ({
   repository: { owner: { login: "owner" }, name: "repo", visibility },
 });
 
+const setIssueSearchNodes = (nodes: unknown[]) => {
+  searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+    issueCount: nodes.length,
+    pageInfo: { hasNextPage: false, endCursor: null },
+    nodes,
+  });
+};
+
+const collectIssueTitles = async (visibility: "public" | "private" | "all") => {
+  setIssueSearchNodes([
+    visibilityNode("PUBLIC"),
+    visibilityNode("PRIVATE"),
+    visibilityNode("INTERNAL"),
+  ]);
+  const events = await makeService({ visibility }).fetchAllEvents();
+  return events.filter((event) => event.type === "Issue").map((e) => e.title);
+};
+
 describe("repository visibility filtering", () => {
-  const setIssueSearchNodes = (nodes: unknown[]) => {
-    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
-      issueCount: nodes.length,
-      pageInfo: { hasNextPage: false, endCursor: null },
-      nodes,
-    });
-  };
-
-  const collectIssueTitles = async (visibility: "public" | "private" | "all") => {
-    setIssueSearchNodes([
-      visibilityNode("PUBLIC"),
-      visibilityNode("PRIVATE"),
-      visibilityNode("INTERNAL"),
-    ]);
-    const events = await makeService({ visibility }).fetchAllEvents();
-    return events.filter((event) => event.type === "Issue").map((e) => e.title);
-  };
-
   it("includes only PUBLIC repositories with --visibility public", async () => {
     expect(await collectIssueTitles("public")).toEqual(["PUBLIC issue"]);
   });
