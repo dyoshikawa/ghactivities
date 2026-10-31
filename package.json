@@ -81,7 +81,7 @@
 		"knip": "6.25.0",
 		"lint-staged": "16.2.7",
 		"oxfmt": "0.74.0",
-		"oxlint": "1.43.0",
+		"oxlint": "1.89.0",
 		"rulesync": "37.1.0",
 		"secretlint": "11.3.1",
 		"simple-git-hooks": "2.13.1",
