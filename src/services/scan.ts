@@ -5,7 +5,6 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, type LanguageModel } from "ai";
 
 import type { ScanConfig } from "../types/scan.js";
-
 import { countTokens } from "../utils/count-tokens.js";
 
 // Conservative per-provider upper bounds on the scan input, counted with

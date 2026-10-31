@@ -8,6 +8,7 @@ description: overview
 
 - Read @README.md if you want to know the tool's usage and specification.
 - Manage runtimes and package managers with @mise.toml .
+- The toolchain is Vite+ (`vp`): `vp pack` (build), `vp test`, `vp lint`, `vp fmt` and `vp check`, run through the package scripts; type checking stays with `tsgo` (`pnpm typecheck`). `vite.config.ts` holds the build (`pack`), formatter (`fmt`), linter (`lint`) and pre-commit (`staged`) settings — there are no separate Oxlint, Oxfmt, lint-staged or tsdown config files. Import test APIs from `vite-plus/test` and `defineConfig` from `vite-plus`, not from `vitest` or `tsdown`.
 - When you want to check entire codebase:
   - You can use:
     - `pnpm cicheck:code` to check code style, type safety, and tests.

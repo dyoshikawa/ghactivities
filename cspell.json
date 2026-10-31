@@ -91,7 +91,6 @@
     "kirodeignore",
     "lightningcss",
     "lilconfig",
-    "lintstagedrc",
     "listr",
     "lockfiles",
     "loongarch",
@@ -111,7 +110,6 @@
     "nuxt",
     "Nuxt",
     "oxlint",
-    "oxlintrc",
     "parseargs",
     "parseurl",
     "pathe",
@@ -224,6 +222,9 @@
     "Gollum",
     "backdoors",
     "exfiltration",
-    "unvalidated"
+    "unvalidated",
+    "knip",
+    "vitest",
+    "voidzero"
   ]
 }

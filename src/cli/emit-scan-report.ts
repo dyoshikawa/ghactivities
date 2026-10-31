@@ -1,5 +1,6 @@
-import * as p from "@clack/prompts";
 import { writeFile } from "node:fs/promises";
+
+import * as p from "@clack/prompts";
 
 /** Write the scan report to a file when `output` is set, otherwise print it. */
 export async function emitScanReport(params: {

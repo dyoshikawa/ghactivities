@@ -1,9 +1,9 @@
 import { parseArgs as nodeParseArgs } from "node:util";
+
 import { z } from "zod/mini";
 
-import type { Branches, CliOptions, Order, Visibility } from "../types/cli.js";
-
 import packageJson from "../../package.json" with { type: "json" };
+import type { Branches, CliOptions, Order, Visibility } from "../types/cli.js";
 import { GITHUB_LOGIN_PATTERN } from "../utils/github-login.js";
 import { parseSize } from "../utils/parse-size.js";
 import { resolveScanConfig } from "./parse-scan-args.js";
