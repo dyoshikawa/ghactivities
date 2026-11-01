@@ -2,12 +2,18 @@
 // organization-internal repositories on GitHub Enterprise.
 export type RepositoryVisibility = "PUBLIC" | "PRIVATE" | "INTERNAL";
 
-export interface PageInfo {
+interface PageInfo {
   hasNextPage: boolean;
   endCursor: string | null;
 }
 
-export interface SearchConnection<TNode> {
+/** One page of a cursor-paginated GraphQL connection. */
+export interface Connection<TNode> {
+  pageInfo: PageInfo;
+  nodes: TNode[];
+}
+
+interface SearchConnection<TNode> {
   issueCount?: number;
   discussionCount?: number;
   pageInfo: PageInfo;
@@ -32,9 +38,7 @@ export interface IssueNode {
   repository: RepositoryNode;
 }
 
-export type IssueSearchResponse = SearchResponse<IssueNode>;
-
-export interface UserContentEditNode {
+interface UserContentEditNode {
   editedAt: string;
   deletedAt: string | null;
   diff: string | null;
@@ -52,10 +56,7 @@ export interface CommentNode {
   userContentEdits: UserContentEditsConnection | null;
 }
 
-export interface CommentsConnection {
-  pageInfo: PageInfo;
-  nodes: CommentNode[];
-}
+export type CommentsConnection = Connection<CommentNode>;
 
 export interface CommentsPageResponse {
   node: { comments: CommentsConnection } | null;
@@ -70,8 +71,6 @@ export interface IssueWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export type IssueCommentSearchResponse = SearchResponse<IssueWithCommentsNode>;
-
 export interface DiscussionNode {
   title: string;
   url: string;
@@ -79,8 +78,6 @@ export interface DiscussionNode {
   createdAt: string;
   repository: RepositoryNode;
 }
-
-export type DiscussionSearchResponse = SearchResponse<DiscussionNode>;
 
 export interface DiscussionWithCommentsNode {
   id: string;
@@ -91,8 +88,6 @@ export interface DiscussionWithCommentsNode {
   comments: CommentsConnection;
 }
 
-export type DiscussionCommentSearchResponse = SearchResponse<DiscussionWithCommentsNode>;
-
 export interface PullRequestNode {
   title: string;
   url: string;
@@ -100,8 +95,6 @@ export interface PullRequestNode {
   createdAt: string;
   repository: RepositoryNode;
 }
-
-export type PullRequestSearchResponse = SearchResponse<PullRequestNode>;
 
 export interface PullRequestWithCommentsNode {
   id: string;
@@ -124,10 +117,7 @@ export interface ReviewNode {
   userContentEdits: UserContentEditsConnection | null;
 }
 
-export interface ReviewsConnection {
-  pageInfo: PageInfo;
-  nodes: ReviewNode[];
-}
+export type ReviewsConnection = Connection<ReviewNode>;
 
 export interface ReviewsPageResponse {
   node: { reviews: ReviewsConnection } | null;
@@ -142,18 +132,6 @@ export interface PullRequestWithReviewsNode {
   reviews: ReviewsConnection;
 }
 
-export type PullRequestCommentSearchResponse = SearchResponse<PullRequestWithCommentsNode>;
-
-export interface CommitContributionNode {
-  occurredAt: string;
-  repository: {
-    owner: { login: string };
-    name: string;
-    visibility: RepositoryVisibility;
-  };
-  commitCount: number;
-}
-
 export interface ContributionsCollectionResponse {
   user: {
     contributionsCollection: {
@@ -162,10 +140,6 @@ export interface ContributionsCollectionResponse {
           owner: { login: string };
           name: string;
           visibility: RepositoryVisibility;
-        };
-        contributions: {
-          pageInfo: PageInfo;
-          nodes: CommitContributionNode[];
         };
       }[];
     };
@@ -187,10 +161,7 @@ export interface CommitHistoryResponse {
     defaultBranchRef: {
       name: string;
       target: {
-        history: {
-          pageInfo: PageInfo;
-          nodes: CommitHistoryNode[];
-        };
+        history: Connection<CommitHistoryNode>;
       };
     } | null;
   };
@@ -198,10 +169,7 @@ export interface CommitHistoryResponse {
 
 export interface BranchRefsResponse {
   repository: {
-    refs: {
-      pageInfo: PageInfo;
-      nodes: { name: string }[];
-    };
+    refs: Connection<{ name: string }>;
   } | null;
 }
 
@@ -209,16 +177,13 @@ export interface BranchCommitHistoryResponse {
   repository: {
     ref: {
       target: {
-        history: {
-          pageInfo: PageInfo;
-          nodes: CommitHistoryNode[];
-        };
+        history: Connection<CommitHistoryNode>;
       } | null;
     } | null;
   } | null;
 }
 
-export interface GistNode {
+interface GistNode {
   name: string;
   description: string | null;
   url: string;
@@ -236,14 +201,11 @@ export interface GistNode {
 
 export interface GistsResponse {
   user: {
-    gists: {
-      pageInfo: PageInfo;
-      nodes: GistNode[];
-    };
+    gists: Connection<GistNode>;
   } | null;
 }
 
-export interface CommitCommentNode {
+interface CommitCommentNode {
   body: string;
   url: string;
   createdAt: string;
@@ -254,14 +216,11 @@ export interface CommitCommentNode {
 
 export interface CommitCommentsResponse {
   user: {
-    commitComments: {
-      pageInfo: PageInfo;
-      nodes: CommitCommentNode[];
-    };
+    commitComments: Connection<CommitCommentNode>;
   } | null;
 }
 
-export interface ReleaseNode {
+interface ReleaseNode {
   name: string | null;
   tagName: string;
   url: string;
@@ -282,10 +241,7 @@ export interface ReleaseNode {
   };
 }
 
-export interface ReleasesConnection {
-  pageInfo: PageInfo;
-  nodes: ReleaseNode[];
-}
+type ReleasesConnection = Connection<ReleaseNode>;
 
 export interface RepositoryWithReleasesNode {
   owner: { login: string };
@@ -296,10 +252,7 @@ export interface RepositoryWithReleasesNode {
 
 export interface RepositoriesWithReleasesResponse {
   user: {
-    repositories: {
-      pageInfo: PageInfo;
-      nodes: RepositoryWithReleasesNode[];
-    };
+    repositories: Connection<RepositoryWithReleasesNode>;
   } | null;
 }
 
@@ -309,7 +262,7 @@ export interface ReleasesPageResponse {
   } | null;
 }
 
-export interface CreatedRepositoryNode {
+interface CreatedRepositoryNode {
   owner: { login: string };
   name: string;
   visibility: RepositoryVisibility;
@@ -322,14 +275,11 @@ export interface CreatedRepositoryNode {
 
 export interface CreatedRepositoriesResponse {
   user: {
-    repositories: {
-      pageInfo: PageInfo;
-      nodes: CreatedRepositoryNode[];
-    };
+    repositories: Connection<CreatedRepositoryNode>;
   } | null;
 }
 
-export interface PushedRepositoryNode {
+interface PushedRepositoryNode {
   owner: { login: string };
   name: string;
   visibility: RepositoryVisibility;
@@ -338,10 +288,7 @@ export interface PushedRepositoryNode {
 
 export interface PushedRepositoriesResponse {
   user: {
-    repositories: {
-      pageInfo: PageInfo;
-      nodes: PushedRepositoryNode[];
-    };
+    repositories: Connection<PushedRepositoryNode>;
   } | null;
 }
 

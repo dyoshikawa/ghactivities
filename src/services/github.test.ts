@@ -13,6 +13,7 @@ const {
   commentPagesByCursor,
   reviewPagesByCursor,
   searchResponsesByQuery,
+  searchNodesByQualifiers,
   failures,
   contributionRepos,
   defaultBranchHistoryNodes,
@@ -23,6 +24,7 @@ const {
   releaseRepoNodes,
   createdRepoNodes,
   pushedRepoNodes,
+  connectionPages,
   restCalls,
   restResponsesByPath,
   restFailureQueue,
@@ -33,6 +35,9 @@ const {
   commentPagesByCursor: new Map<string, unknown>(),
   reviewPagesByCursor: new Map<string, unknown>(),
   searchResponsesByQuery: new Map<string, unknown>(),
+  // Nodes served to every search whose query starts with the key (the
+  // fetcher's qualifiers), independent of the date window appended to it.
+  searchNodesByQualifiers: new Map<string, unknown[]>(),
   // Failure injection: while a substring's error list is non-empty, calls
   // whose query, searchQuery, or "after:<cursor>" suffix contains the
   // substring reject with the next error from the list.
@@ -47,6 +52,9 @@ const {
   releaseRepoNodes: [] as unknown[],
   createdRepoNodes: [] as unknown[],
   pushedRepoNodes: [] as unknown[],
+  // Multi-page user/repository connections, keyed by "<kind>:<after cursor>"
+  // ("" for the first page). Unset kinds fall back to the single-page lists.
+  connectionPages: new Map<string, { pageInfo: unknown; nodes: unknown[] }>(),
   restCalls: [] as string[],
   restResponsesByPath: new Map<string, unknown>(),
   // Each entry makes the next REST call fail with the given status and body.
@@ -82,6 +90,9 @@ function handleSearch(variables: Record<string, unknown>) {
   const preset = searchResponsesByQuery.get(searchQuery);
   if (preset) return { search: preset };
   let nodes: unknown[] = [];
+  for (const [qualifiers, qualifierNodes] of searchNodesByQualifiers) {
+    if (searchQuery.startsWith(`${qualifiers} `)) nodes = qualifierNodes;
+  }
   if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
     nodes = issueCommentSearchNodes;
   }
@@ -97,6 +108,12 @@ function handleSearch(variables: Record<string, unknown>) {
 // each query the service issues, and records the (query, variables) pairs.
 vi.mock("@octokit/graphql", () => {
   const noNextPage = { hasNextPage: false, endCursor: null };
+
+  const connection = (kind: string, variables: Record<string, unknown>, nodes: unknown[]) =>
+    connectionPages.get(`${kind}:${String(variables.after ?? "")}`) ?? {
+      pageInfo: noNextPage,
+      nodes,
+    };
 
   const impl = (query: string, variables: Record<string, unknown> = {}) => {
     calls.push({ query, variables });
@@ -117,7 +134,7 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("refs(refPrefix:")) {
       return Promise.resolve({
-        repository: { refs: { pageInfo: noNextPage, nodes: branchRefNodes } },
+        repository: { refs: connection("refs", variables, branchRefNodes) },
       });
     }
     if (query.includes("ref(qualifiedName:")) {
@@ -141,34 +158,34 @@ vi.mock("@octokit/graphql", () => {
     }
     if (query.includes("gists(")) {
       return Promise.resolve({
-        user: { gists: { pageInfo: noNextPage, nodes: gistNodes } },
+        user: { gists: connection("gists", variables, gistNodes) },
       });
     }
     if (query.includes("commitComments(")) {
       return Promise.resolve({
-        user: { commitComments: { pageInfo: noNextPage, nodes: commitCommentNodes } },
+        user: { commitComments: connection("commitComments", variables, commitCommentNodes) },
       });
     }
     // The per-repository releases page query selects repository { releases };
     // the discovery query nests releases under user { repositories }.
     if (query.includes("releases(first: $first")) {
       return Promise.resolve({
-        repository: { releases: { pageInfo: noNextPage, nodes: [] } },
+        repository: { releases: connection("releases", variables, []) },
       });
     }
     if (query.includes("releases(")) {
       return Promise.resolve({
-        user: { repositories: { pageInfo: noNextPage, nodes: releaseRepoNodes } },
+        user: { repositories: connection("releaseRepos", variables, releaseRepoNodes) },
       });
     }
     if (query.includes("pushedAt")) {
       return Promise.resolve({
-        user: { repositories: { pageInfo: noNextPage, nodes: pushedRepoNodes } },
+        user: { repositories: connection("pushedRepos", variables, pushedRepoNodes) },
       });
     }
     if (query.includes("isFork")) {
       return Promise.resolve({
-        user: { repositories: { pageInfo: noNextPage, nodes: createdRepoNodes } },
+        user: { repositories: connection("createdRepos", variables, createdRepoNodes) },
       });
     }
     if (query.includes("node(id:")) {
@@ -225,6 +242,7 @@ beforeEach(() => {
   commentPagesByCursor.clear();
   reviewPagesByCursor.clear();
   searchResponsesByQuery.clear();
+  searchNodesByQualifiers.clear();
   failures.clear();
   contributionRepos.length = 0;
   defaultBranchHistoryNodes.length = 0;
@@ -235,6 +253,7 @@ beforeEach(() => {
   releaseRepoNodes.length = 0;
   createdRepoNodes.length = 0;
   pushedRepoNodes.length = 0;
+  connectionPages.clear();
   restCalls.length = 0;
   restResponsesByPath.clear();
   restFailureQueue.length = 0;
@@ -1649,5 +1668,337 @@ describe("GitHubService GraphQL variables", () => {
     for (const call of searchCalls) {
       expect(Object.hasOwn(call.variables, "searchQuery")).toBe(true);
     }
+  });
+});
+
+// JSON.stringify keeps key order, which is part of the output format.
+const json = (value: unknown) => JSON.stringify(value);
+
+describe("search-based event shapes", () => {
+  const repository = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
+  const privateRepository = { owner: { login: "owner" }, name: "secret", visibility: "PRIVATE" };
+  const eventRepository = { owner: "owner", name: "repo", visibility: "PUBLIC" };
+  const noNextPage = { hasNextPage: false, endCursor: null };
+  const edits = {
+    nodes: [{ editedAt: "2024-01-06T00:00:00Z", deletedAt: null, diff: "old text" }],
+  };
+
+  const authoredNode = (kind: string) => ({
+    title: `${kind} title`,
+    url: `https://github.com/owner/repo/${kind}/1`,
+    body: `${kind} body`,
+    createdAt: "2024-01-03T00:00:00Z",
+    repository,
+  });
+
+  const commentedNode = (kind: string) => ({
+    id: `${kind}_NODE_ID`,
+    title: `${kind} title`,
+    url: `https://github.com/owner/repo/${kind}/2`,
+    createdAt: "2023-06-01T00:00:00Z",
+    repository,
+    comments: {
+      pageInfo: noNextPage,
+      nodes: [
+        {
+          body: `${kind} comment`,
+          url: `https://github.com/owner/repo/${kind}/2#comment-1`,
+          createdAt: "2024-01-05T00:00:00Z",
+          author: { login: "testuser" },
+          userContentEdits: edits,
+        },
+        {
+          body: "someone else",
+          url: `https://github.com/owner/repo/${kind}/2#comment-2`,
+          createdAt: "2024-01-05T00:00:00Z",
+          author: { login: "someone" },
+          userContentEdits: null,
+        },
+      ],
+    },
+  });
+
+  it("omits editHistory for own comments that were never edited", async () => {
+    const node = commentedNode("pull");
+    searchNodesByQualifiers.set("commenter:testuser is:pr", [
+      {
+        ...node,
+        comments: {
+          pageInfo: noNextPage,
+          nodes: [
+            { ...node.comments.nodes[0], userContentEdits: null },
+            { ...node.comments.nodes[0], url: "second", userContentEdits: { nodes: [] } },
+          ],
+        },
+      },
+    ]);
+
+    const events = await makeService().fetchAllEvents();
+
+    const comments = events.filter((event) => event.type === "PullRequestComment");
+    expect(comments).toHaveLength(2);
+    for (const comment of comments) {
+      expect(comment).not.toHaveProperty("editHistory");
+    }
+  });
+
+  it("maps authored items and own comments to events with a stable field order", async () => {
+    searchNodesByQualifiers.set("author:testuser is:issue", [
+      authoredNode("issues"),
+      { ...authoredNode("hidden"), repository: privateRepository },
+    ]);
+    searchNodesByQualifiers.set("author:testuser type:discussion", [authoredNode("discussions")]);
+    searchNodesByQualifiers.set("author:testuser is:pr", [authoredNode("pull")]);
+    searchNodesByQualifiers.set("commenter:testuser type:discussion", [
+      commentedNode("discussions"),
+    ]);
+    searchNodesByQualifiers.set("commenter:testuser is:pr", [commentedNode("pull")]);
+
+    const events = await makeService().fetchAllEvents();
+
+    const ofType = (type: string) => events.filter((event) => event.type === type);
+    expect(json(ofType("Issue"))).toBe(
+      json([
+        {
+          type: "Issue",
+          createdAt: "2024-01-03T00:00:00Z",
+          title: "issues title",
+          url: "https://github.com/owner/repo/issues/1",
+          body: "issues body",
+          repository: eventRepository,
+        },
+      ]),
+    );
+    expect(json(ofType("Discussion"))).toBe(
+      json([
+        {
+          type: "Discussion",
+          createdAt: "2024-01-03T00:00:00Z",
+          title: "discussions title",
+          url: "https://github.com/owner/repo/discussions/1",
+          body: "discussions body",
+          repository: eventRepository,
+        },
+      ]),
+    );
+    expect(json(ofType("PullRequest"))).toBe(
+      json([
+        {
+          type: "PullRequest",
+          createdAt: "2024-01-03T00:00:00Z",
+          title: "pull title",
+          url: "https://github.com/owner/repo/pull/1",
+          body: "pull body",
+          repository: eventRepository,
+        },
+      ]),
+    );
+    const editHistory = [{ editedAt: "2024-01-06T00:00:00Z", deletedAt: null, diff: "old text" }];
+    expect(json(ofType("DiscussionComment"))).toBe(
+      json([
+        {
+          type: "DiscussionComment",
+          createdAt: "2024-01-05T00:00:00Z",
+          discussionTitle: "discussions title",
+          discussionUrl: "https://github.com/owner/repo/discussions/2",
+          body: "discussions comment",
+          url: "https://github.com/owner/repo/discussions/2#comment-1",
+          repository: eventRepository,
+          editHistory,
+        },
+      ]),
+    );
+    expect(json(ofType("PullRequestComment"))).toBe(
+      json([
+        {
+          type: "PullRequestComment",
+          createdAt: "2024-01-05T00:00:00Z",
+          prTitle: "pull title",
+          prUrl: "https://github.com/owner/repo/pull/2",
+          body: "pull comment",
+          url: "https://github.com/owner/repo/pull/2#comment-1",
+          repository: eventRepository,
+          editHistory,
+        },
+      ]),
+    );
+  });
+});
+
+const connectionPage = (nodes: unknown[], endCursor: string | null) => ({
+  pageInfo: { hasNextPage: endCursor !== null, endCursor },
+  nodes,
+});
+
+const gistNode = (name: string, createdAt: string) => ({
+  name,
+  description: null,
+  url: `https://gist.github.com/testuser/${name}`,
+  createdAt,
+  isPublic: true,
+  files: [],
+});
+
+const createdRepo = (name: string, createdAt: string) => ({
+  owner: { login: "testuser" },
+  name,
+  visibility: "PUBLIC",
+  url: `https://github.com/testuser/${name}`,
+  description: null,
+  createdAt,
+  isFork: false,
+  object: null,
+});
+
+const releaseNode = (name: string, createdAt: string) => ({
+  name,
+  tagName: name,
+  url: `https://github.com/testuser/repo/releases/tag/${name}`,
+  createdAt,
+  publishedAt: createdAt,
+  description: null,
+  isPrerelease: false,
+  isDraft: false,
+  author: { login: "testuser" },
+  releaseAssets: { nodes: [] },
+});
+
+const releaseRepo = (name: string, releasesEndCursor: string | null = null) => ({
+  owner: { login: "testuser" },
+  name,
+  visibility: "PUBLIC",
+  releases: connectionPage(
+    [releaseNode(`${name} release`, "2024-01-05T00:00:00Z")],
+    releasesEndCursor,
+  ),
+});
+
+const pushedRepo = (name: string, pushedAt: string) => ({
+  owner: { login: "testuser" },
+  name,
+  visibility: "PUBLIC",
+  pushedAt,
+});
+
+const repoNode = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
+
+const afterCursors = (marker: string) =>
+  calls.filter((call) => call.query.includes(marker)).map((call) => call.variables.after);
+
+const commitCommentNode = (body: string) => ({
+  body,
+  url: `https://github.com/owner/repo/commit/abc#${body}`,
+  createdAt: "2024-01-05T00:00:00Z",
+  commit: { oid: "abc" },
+  repository: repoNode,
+  userContentEdits: null,
+});
+
+describe("connection pagination", () => {
+  it("pages gists and stops at the first one older than --since", async () => {
+    connectionPages.set("gists:", connectionPage([gistNode("g1", "2024-01-10T00:00:00Z")], "G2"));
+    connectionPages.set(
+      "gists:G2",
+      connectionPage(
+        [gistNode("g2", "2024-01-05T00:00:00Z"), gistNode("g0", "2023-12-01T00:00:00Z")],
+        "G3",
+      ),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "Gist").map((event) => event.repository.name),
+    ).toEqual(["g1", "g2"]);
+    expect(afterCursors("gists(")).toEqual([null, "G2"]);
+  });
+
+  it("pages every commit comment page", async () => {
+    connectionPages.set("commitComments:", connectionPage([commitCommentNode("c1")], "C2"));
+    connectionPages.set("commitComments:C2", connectionPage([commitCommentNode("c2")], null));
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "CommitComment").map((event) => event.body),
+    ).toEqual(["c1", "c2"]);
+    expect(afterCursors("commitComments(")).toEqual([null, "C2"]);
+  });
+
+  it("pages created repositories and stops at the first one older than --since", async () => {
+    connectionPages.set(
+      "createdRepos:",
+      connectionPage([createdRepo("r1", "2024-01-10T00:00:00Z")], "R2"),
+    );
+    connectionPages.set(
+      "createdRepos:R2",
+      connectionPage(
+        [createdRepo("r2", "2024-01-05T00:00:00Z"), createdRepo("r0", "2023-01-01T00:00:00Z")],
+        "R3",
+      ),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "Repository").map((event) => event.repository.name),
+    ).toEqual(["r1", "r2"]);
+    expect(afterCursors("isFork")).toEqual([null, "R2"]);
+  });
+
+  it("pages the owned repositories walked for releases", async () => {
+    connectionPages.set("releaseRepos:", connectionPage([releaseRepo("a")], "P2"));
+    connectionPages.set("releaseRepos:P2", connectionPage([releaseRepo("b")], null));
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(
+      events.filter((event) => event.type === "Release").map((event) => event.repository.name),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("pages a repository's releases and stops at the first one created before --since", async () => {
+    connectionPages.set("releaseRepos:", connectionPage([releaseRepo("repo", "L2")], null));
+    connectionPages.set(
+      "releases:L2",
+      connectionPage(
+        [
+          releaseNode("second page", "2024-01-04T00:00:00Z"),
+          releaseNode("too old", "2023-12-01T00:00:00Z"),
+        ],
+        "L3",
+      ),
+    );
+
+    const events = await makeService().fetchAllEvents();
+
+    expect(events.filter((event) => event.type === "Release").map((event) => event.title)).toEqual([
+      "repo release",
+      "second page",
+    ]);
+    expect(afterCursors("releases(first: $first")).toEqual(["L2"]);
+  });
+
+  it("pages pushed repositories and branches with --branches all", async () => {
+    connectionPages.set(
+      "pushedRepos:",
+      connectionPage([pushedRepo("fresh", "2024-01-10T00:00:00Z")], "U2"),
+    );
+    connectionPages.set(
+      "pushedRepos:U2",
+      connectionPage([pushedRepo("stale", "2023-01-01T00:00:00Z")], "U3"),
+    );
+    connectionPages.set("refs:", connectionPage([{ name: "main" }], "B2"));
+    connectionPages.set("refs:B2", connectionPage([{ name: "feature" }], null));
+
+    await makeService({ branches: "all" }).fetchAllEvents();
+
+    expect(afterCursors("pushedAt")).toEqual([null, "U2"]);
+    const historyCalls = calls.filter((call) => call.query.includes("ref(qualifiedName:"));
+    expect(
+      historyCalls.map(
+        (call) => `${String(call.variables.name)} ${String(call.variables.qualifiedName)}`,
+      ),
+    ).toEqual(["fresh refs/heads/main", "fresh refs/heads/feature"]);
   });
 });

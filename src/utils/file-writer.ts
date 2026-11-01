@@ -48,37 +48,31 @@ async function splitAndWriteFiles(params: {
   const base = basename(output, ext);
 
   const files: string[] = [];
-  let currentChunk: GitHubEvent[] = [];
-  let fileIndex = 1;
+  const writeChunk = async (json: string): Promise<void> => {
+    const filePath = join(dir, `${base}_${String(files.length + 1)}${ext}`);
+    await writeFile(filePath, json, "utf-8");
+    files.push(filePath);
+  };
 
+  let currentChunk: GitHubEvent[] = [];
   for (const event of events) {
     currentChunk.push(event);
     const chunkJson = JSON.stringify(currentChunk, null, 2);
+    if (!exceedsLimit({ json: chunkJson, maxLengthSize, maxTokens })) continue;
 
-    if (exceedsLimit({ json: chunkJson, maxLengthSize, maxTokens })) {
-      if (currentChunk.length === 1) {
-        const filePath = join(dir, `${base}_${String(fileIndex)}${ext}`);
-        await writeFile(filePath, chunkJson, "utf-8");
-        files.push(filePath);
-        fileIndex++;
-        currentChunk = [];
-      } else {
-        currentChunk.pop();
-        const prevJson = JSON.stringify(currentChunk, null, 2);
-        const filePath = join(dir, `${base}_${String(fileIndex)}${ext}`);
-        await writeFile(filePath, prevJson, "utf-8");
-        files.push(filePath);
-        fileIndex++;
-        currentChunk = [event];
-      }
+    if (currentChunk.length === 1) {
+      // A single event larger than the limit still gets a file of its own.
+      await writeChunk(chunkJson);
+      currentChunk = [];
+    } else {
+      currentChunk.pop();
+      await writeChunk(JSON.stringify(currentChunk, null, 2));
+      currentChunk = [event];
     }
   }
 
   if (currentChunk.length > 0) {
-    const filePath = join(dir, `${base}_${String(fileIndex)}${ext}`);
-    const chunkJson = JSON.stringify(currentChunk, null, 2);
-    await writeFile(filePath, chunkJson, "utf-8");
-    files.push(filePath);
+    await writeChunk(JSON.stringify(currentChunk, null, 2));
   }
 
   return files;

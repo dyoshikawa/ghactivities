@@ -36,14 +36,14 @@ export interface ContentEdit {
   diff: string | null;
 }
 
-export interface IssueEvent extends BaseEvent {
+interface IssueEvent extends BaseEvent {
   type: "Issue";
   title: string;
   url: string;
   body: string;
 }
 
-export interface IssueCommentEvent extends BaseEvent {
+interface IssueCommentEvent extends BaseEvent {
   type: "IssueComment";
   issueTitle: string;
   issueUrl: string;
@@ -52,14 +52,14 @@ export interface IssueCommentEvent extends BaseEvent {
   editHistory?: ContentEdit[];
 }
 
-export interface DiscussionEvent extends BaseEvent {
+interface DiscussionEvent extends BaseEvent {
   type: "Discussion";
   title: string;
   url: string;
   body: string;
 }
 
-export interface DiscussionCommentEvent extends BaseEvent {
+interface DiscussionCommentEvent extends BaseEvent {
   type: "DiscussionComment";
   discussionTitle: string;
   discussionUrl: string;
@@ -68,14 +68,14 @@ export interface DiscussionCommentEvent extends BaseEvent {
   editHistory?: ContentEdit[];
 }
 
-export interface PullRequestEvent extends BaseEvent {
+interface PullRequestEvent extends BaseEvent {
   type: "PullRequest";
   title: string;
   url: string;
   body: string;
 }
 
-export interface PullRequestCommentEvent extends BaseEvent {
+interface PullRequestCommentEvent extends BaseEvent {
   type: "PullRequestComment";
   prTitle: string;
   prUrl: string;
@@ -84,7 +84,7 @@ export interface PullRequestCommentEvent extends BaseEvent {
   editHistory?: ContentEdit[];
 }
 
-export interface PullRequestReviewCommentEvent extends BaseEvent {
+interface PullRequestReviewCommentEvent extends BaseEvent {
   type: "PullRequestReviewComment";
   prTitle: string;
   prUrl: string;
@@ -114,7 +114,7 @@ export interface CommitEvent extends BaseEvent {
   diff?: CommitDiffFile[];
 }
 
-export interface CommitCommentEvent extends BaseEvent {
+interface CommitCommentEvent extends BaseEvent {
   type: "CommitComment";
   body: string;
   url: string;
@@ -123,7 +123,7 @@ export interface CommitCommentEvent extends BaseEvent {
   editHistory?: ContentEdit[];
 }
 
-export interface GistFileEntry {
+interface GistFileEntry {
   name: string;
   size: number;
   /** File content; null for binary files. */
@@ -135,21 +135,21 @@ export interface GistFileEntry {
  * the gist owner as `owner`, the gist id as `name`, and PUBLIC/PRIVATE for
  * public/secret gists so the --visibility filter applies uniformly.
  */
-export interface GistEvent extends BaseEvent {
+interface GistEvent extends BaseEvent {
   type: "Gist";
   description: string | null;
   url: string;
   files: GistFileEntry[];
 }
 
-export interface ReleaseAssetEntry {
+interface ReleaseAssetEntry {
   name: string;
   url: string;
   size: number;
   contentType: string;
 }
 
-export interface ReleaseEvent extends BaseEvent {
+interface ReleaseEvent extends BaseEvent {
   type: "Release";
   title: string;
   tagName: string;
@@ -161,7 +161,7 @@ export interface ReleaseEvent extends BaseEvent {
 }
 
 /** A repository created by the user within the date range. */
-export interface RepositoryEvent extends BaseEvent {
+interface RepositoryEvent extends BaseEvent {
   type: "Repository";
   url: string;
   description: string | null;
@@ -170,7 +170,7 @@ export interface RepositoryEvent extends BaseEvent {
   readme: string | null;
 }
 
-export interface WikiPageEditEvent extends BaseEvent {
+interface WikiPageEditEvent extends BaseEvent {
   type: "WikiPageEdit";
   pageTitle: string;
   action: string;

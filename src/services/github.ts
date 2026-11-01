@@ -11,6 +11,7 @@ import type {
   CommitCommentsResponse,
   CommitHistoryNode,
   CommitHistoryResponse,
+  Connection,
   ContributionsCollectionResponse,
   CreatedRepositoriesResponse,
   DiscussionNode,
@@ -22,9 +23,9 @@ import type {
   PullRequestWithCommentsNode,
   PullRequestWithReviewsNode,
   PushedRepositoriesResponse,
-  ReleasesConnection,
   ReleasesPageResponse,
   RepositoriesWithReleasesResponse,
+  RepositoryNode,
   RepositoryVisibility,
   RepositoryWithReleasesNode,
   RestCommitDetail,
@@ -133,18 +134,47 @@ interface SearchParams {
   extraVariables?: Record<string, unknown>;
 }
 
-// Maps a comment's prior revisions to the event's editHistory field;
-// undefined (field omitted) when the comment was never edited.
-function toEditHistory(
-  edits: UserContentEditsConnection | null | undefined,
-): ContentEdit[] | undefined {
+function toEventRepository(repository: RepositoryNode): GitHubEvent["repository"] {
+  return {
+    owner: repository.owner.login,
+    name: repository.name,
+    visibility: repository.visibility,
+  };
+}
+
+// Maps a comment's prior revisions to the event's editHistory field, ready to
+// spread into the event; the field is omitted when the comment was never
+// edited.
+function editHistoryField(edits: UserContentEditsConnection | null | undefined): {
+  editHistory?: ContentEdit[];
+} {
   const nodes = edits?.nodes ?? [];
-  if (nodes.length === 0) return undefined;
-  return nodes.map((edit) => ({
-    editedAt: edit.editedAt,
-    deletedAt: edit.deletedAt,
-    diff: edit.diff,
-  }));
+  if (nodes.length === 0) return {};
+  return {
+    editHistory: nodes.map((edit) => ({
+      editedAt: edit.editedAt,
+      deletedAt: edit.deletedAt,
+      diff: edit.diff,
+    })),
+  };
+}
+
+// Yields the nodes of each page of a cursor-paginated connection: `first`
+// when the first page is already at hand (nested in a parent query),
+// otherwise fetched with a null cursor. A missing connection (an unknown
+// user, repository or node) ends the iteration, and breaking out of the
+// consuming loop stops further requests.
+async function* paginate<TNode>(params: {
+  first?: Connection<TNode>;
+  fetchPage: (after: string | null) => Promise<Connection<TNode> | null | undefined>;
+}): AsyncGenerator<TNode[]> {
+  let connection = params.first ?? (await params.fetchPage(null));
+  while (connection) {
+    yield connection.nodes;
+    const { hasNextPage, endCursor } = connection.pageInfo;
+    if (!hasNextPage || !endCursor) return;
+    connection = await params.fetchPage(endCursor);
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -269,11 +299,35 @@ export class GitHubService {
     // Fetchers run one at a time: GitHub's secondary rate-limit guidance is to
     // avoid concurrent requests, and each fetcher already pages sequentially.
     const fetchers: { label: string; run: () => Promise<GitHubEvent[]> }[] = [
-      { label: "issues", run: () => this.fetchIssues(username) },
+      {
+        label: "issues",
+        run: () =>
+          this.fetchAuthoredItems({
+            type: "Issue",
+            query: ISSUE_SEARCH_QUERY,
+            qualifiers: `author:${username} is:issue`,
+          }),
+      },
       { label: "issue comments", run: () => this.fetchIssueComments(username) },
-      { label: "discussions", run: () => this.fetchDiscussions(username) },
+      {
+        label: "discussions",
+        run: () =>
+          this.fetchAuthoredItems({
+            type: "Discussion",
+            query: DISCUSSION_SEARCH_QUERY,
+            qualifiers: `author:${username} type:discussion`,
+          }),
+      },
       { label: "discussion comments", run: () => this.fetchDiscussionComments(username) },
-      { label: "pull requests", run: () => this.fetchPullRequests(username) },
+      {
+        label: "pull requests",
+        run: () =>
+          this.fetchAuthoredItems({
+            type: "PullRequest",
+            query: PULL_REQUEST_SEARCH_QUERY,
+            qualifiers: `author:${username} is:pr`,
+          }),
+      },
       { label: "pull request comments", run: () => this.fetchPullRequestComments(username) },
       {
         label: "pull request review comments",
@@ -509,225 +563,143 @@ export class GitHubService {
     comments: CommentsConnection;
     pageQuery: string;
   }): Promise<CommentNode[]> {
-    const comments = [...params.comments.nodes];
-    let { hasNextPage, endCursor } = params.comments.pageInfo;
-
-    while (hasNextPage && endCursor) {
-      const response: CommentsPageResponse = await this.execute<CommentsPageResponse>(
-        params.pageQuery,
-        { nodeId: params.nodeId, first: 100, after: endCursor },
-      );
-      const page = response.node?.comments;
-      if (!page) break;
-      comments.push(...page.nodes);
-      ({ hasNextPage, endCursor } = page.pageInfo);
+    const comments: CommentNode[] = [];
+    const commentPages = paginate({
+      first: params.comments,
+      fetchPage: async (after) => {
+        const response = await this.execute<CommentsPageResponse>(params.pageQuery, {
+          nodeId: params.nodeId,
+          first: 100,
+          after,
+        });
+        return response.node?.comments;
+      },
+    });
+    for await (const nodes of commentPages) {
+      comments.push(...nodes);
     }
-
     return comments;
   }
 
-  private async fetchIssues(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<IssueNode>({
-      query: ISSUE_SEARCH_QUERY,
-      qualifiers: `author:${username} is:issue`,
+  // Issues, discussions and pull requests the user opened: a creation-date
+  // search filtered by visibility, with one event per item.
+  private async fetchAuthoredItems(params: {
+    type: "Issue" | "Discussion" | "PullRequest";
+    query: string;
+    qualifiers: string;
+  }): Promise<GitHubEvent[]> {
+    const nodes = await this.searchAllNodes<IssueNode | DiscussionNode | PullRequestNode>({
+      query: params.query,
+      qualifiers: params.qualifiers,
       dateField: "created",
     });
 
-    const events: GitHubEvent[] = [];
+    return nodes
+      .filter((node) => this.matchesVisibility(node.repository.visibility))
+      .map((node) => ({
+        type: params.type,
+        createdAt: node.createdAt,
+        title: node.title,
+        url: node.url,
+        body: node.body,
+        repository: toEventRepository(node.repository),
+      }));
+  }
+
+  // Comments the user left on issues, discussions or pull requests: an
+  // updated-date commenter search, every comment page of each visible item,
+  // and only the user's own comments within the range.
+  private async searchOwnComments<
+    TNode extends IssueWithCommentsNode | DiscussionWithCommentsNode | PullRequestWithCommentsNode,
+  >(params: {
+    username: string;
+    query: string;
+    qualifiers: string;
+    pageQuery: string;
+  }): Promise<{ node: TNode; comment: CommentNode }[]> {
+    const nodes = await this.searchAllNodes<TNode>({
+      query: params.query,
+      qualifiers: params.qualifiers,
+      dateField: "updated",
+    });
+
+    const matches: { node: TNode; comment: CommentNode }[] = [];
     for (const node of nodes) {
-      if (this.matchesVisibility(node.repository.visibility)) {
-        events.push({
-          type: "Issue",
-          createdAt: node.createdAt,
-          title: node.title,
-          url: node.url,
-          body: node.body,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
-        });
+      if (!this.matchesVisibility(node.repository.visibility)) continue;
+
+      const comments = await this.fetchAllComments({
+        nodeId: node.id,
+        comments: node.comments,
+        pageQuery: params.pageQuery,
+      });
+      for (const comment of comments) {
+        if (
+          comment.author?.login === params.username &&
+          this.isWithinDateRange(comment.createdAt)
+        ) {
+          matches.push({ node, comment });
+        }
       }
     }
 
-    return events;
+    return matches;
   }
 
   private async fetchIssueComments(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<IssueWithCommentsNode>({
+    const matches = await this.searchOwnComments<IssueWithCommentsNode>({
+      username,
       query: ISSUE_COMMENT_SEARCH_QUERY,
       qualifiers: `commenter:${username} is:issue`,
-      dateField: "updated",
+      pageQuery: ISSUE_COMMENTS_PAGE_QUERY,
     });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (!this.matchesVisibility(node.repository.visibility)) continue;
-
-      const comments = await this.fetchAllComments({
-        nodeId: node.id,
-        comments: node.comments,
-        pageQuery: ISSUE_COMMENTS_PAGE_QUERY,
-      });
-      for (const comment of comments) {
-        if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          const editHistory = toEditHistory(comment.userContentEdits);
-          events.push({
-            type: "IssueComment",
-            createdAt: comment.createdAt,
-            issueTitle: node.title,
-            issueUrl: node.url,
-            body: comment.body,
-            url: comment.url,
-            repository: {
-              owner: node.repository.owner.login,
-              name: node.repository.name,
-              visibility: node.repository.visibility,
-            },
-            ...(editHistory ? { editHistory } : {}),
-          });
-        }
-      }
-    }
-
-    return events;
-  }
-
-  private async fetchDiscussions(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<DiscussionNode>({
-      query: DISCUSSION_SEARCH_QUERY,
-      qualifiers: `author:${username} type:discussion`,
-      dateField: "created",
-    });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (this.matchesVisibility(node.repository.visibility)) {
-        events.push({
-          type: "Discussion",
-          createdAt: node.createdAt,
-          title: node.title,
-          url: node.url,
-          body: node.body,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
-        });
-      }
-    }
-
-    return events;
+    return matches.map(({ node, comment }) => ({
+      type: "IssueComment",
+      createdAt: comment.createdAt,
+      issueTitle: node.title,
+      issueUrl: node.url,
+      body: comment.body,
+      url: comment.url,
+      repository: toEventRepository(node.repository),
+      ...editHistoryField(comment.userContentEdits),
+    }));
   }
 
   private async fetchDiscussionComments(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<DiscussionWithCommentsNode>({
+    const matches = await this.searchOwnComments<DiscussionWithCommentsNode>({
+      username,
       query: DISCUSSION_COMMENT_SEARCH_QUERY,
       qualifiers: `commenter:${username} type:discussion`,
-      dateField: "updated",
+      pageQuery: DISCUSSION_COMMENTS_PAGE_QUERY,
     });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (!this.matchesVisibility(node.repository.visibility)) continue;
-
-      const comments = await this.fetchAllComments({
-        nodeId: node.id,
-        comments: node.comments,
-        pageQuery: DISCUSSION_COMMENTS_PAGE_QUERY,
-      });
-      for (const comment of comments) {
-        if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          const editHistory = toEditHistory(comment.userContentEdits);
-          events.push({
-            type: "DiscussionComment",
-            createdAt: comment.createdAt,
-            discussionTitle: node.title,
-            discussionUrl: node.url,
-            body: comment.body,
-            url: comment.url,
-            repository: {
-              owner: node.repository.owner.login,
-              name: node.repository.name,
-              visibility: node.repository.visibility,
-            },
-            ...(editHistory ? { editHistory } : {}),
-          });
-        }
-      }
-    }
-
-    return events;
-  }
-
-  private async fetchPullRequests(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<PullRequestNode>({
-      query: PULL_REQUEST_SEARCH_QUERY,
-      qualifiers: `author:${username} is:pr`,
-      dateField: "created",
-    });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (this.matchesVisibility(node.repository.visibility)) {
-        events.push({
-          type: "PullRequest",
-          createdAt: node.createdAt,
-          title: node.title,
-          url: node.url,
-          body: node.body,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
-        });
-      }
-    }
-
-    return events;
+    return matches.map(({ node, comment }) => ({
+      type: "DiscussionComment",
+      createdAt: comment.createdAt,
+      discussionTitle: node.title,
+      discussionUrl: node.url,
+      body: comment.body,
+      url: comment.url,
+      repository: toEventRepository(node.repository),
+      ...editHistoryField(comment.userContentEdits),
+    }));
   }
 
   private async fetchPullRequestComments(username: string): Promise<GitHubEvent[]> {
-    const nodes = await this.searchAllNodes<PullRequestWithCommentsNode>({
+    const matches = await this.searchOwnComments<PullRequestWithCommentsNode>({
+      username,
       query: PULL_REQUEST_COMMENT_SEARCH_QUERY,
       qualifiers: `commenter:${username} is:pr`,
-      dateField: "updated",
+      pageQuery: PULL_REQUEST_COMMENTS_PAGE_QUERY,
     });
-
-    const events: GitHubEvent[] = [];
-    for (const node of nodes) {
-      if (!this.matchesVisibility(node.repository.visibility)) continue;
-
-      const comments = await this.fetchAllComments({
-        nodeId: node.id,
-        comments: node.comments,
-        pageQuery: PULL_REQUEST_COMMENTS_PAGE_QUERY,
-      });
-      for (const comment of comments) {
-        if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-          const editHistory = toEditHistory(comment.userContentEdits);
-          events.push({
-            type: "PullRequestComment",
-            createdAt: comment.createdAt,
-            prTitle: node.title,
-            prUrl: node.url,
-            body: comment.body,
-            url: comment.url,
-            repository: {
-              owner: node.repository.owner.login,
-              name: node.repository.name,
-              visibility: node.repository.visibility,
-            },
-            ...(editHistory ? { editHistory } : {}),
-          });
-        }
-      }
-    }
-
-    return events;
+    return matches.map(({ node, comment }) => ({
+      type: "PullRequestComment",
+      createdAt: comment.createdAt,
+      prTitle: node.title,
+      prUrl: node.url,
+      body: comment.body,
+      url: comment.url,
+      repository: toEventRepository(node.repository),
+      ...editHistoryField(comment.userContentEdits),
+    }));
   }
 
   // Mirrors fetchAllComments for the reviews connection of a pull request.
@@ -736,20 +708,22 @@ export class GitHubService {
     reviews: ReviewsConnection;
     reviewAuthor: string;
   }): Promise<ReviewNode[]> {
-    const reviews = [...params.reviews.nodes];
-    let { hasNextPage, endCursor } = params.reviews.pageInfo;
-
-    while (hasNextPage && endCursor) {
-      const response: ReviewsPageResponse = await this.execute<ReviewsPageResponse>(
-        REVIEWS_PAGE_QUERY,
-        { nodeId: params.nodeId, first: 25, after: endCursor, reviewAuthor: params.reviewAuthor },
-      );
-      const page = response.node?.reviews;
-      if (!page) break;
-      reviews.push(...page.nodes);
-      ({ hasNextPage, endCursor } = page.pageInfo);
+    const reviews: ReviewNode[] = [];
+    const reviewPages = paginate({
+      first: params.reviews,
+      fetchPage: async (after) => {
+        const response = await this.execute<ReviewsPageResponse>(REVIEWS_PAGE_QUERY, {
+          nodeId: params.nodeId,
+          first: 25,
+          after,
+          reviewAuthor: params.reviewAuthor,
+        });
+        return response.node?.reviews;
+      },
+    });
+    for await (const nodes of reviewPages) {
+      reviews.push(...nodes);
     }
-
     return reviews;
   }
 
@@ -769,11 +743,7 @@ export class GitHubService {
     for (const node of nodes) {
       if (!this.matchesVisibility(node.repository.visibility)) continue;
 
-      const repository = {
-        owner: node.repository.owner.login,
-        name: node.repository.name,
-        visibility: node.repository.visibility,
-      };
+      const repository = toEventRepository(node.repository);
 
       const reviews = await this.fetchAllReviews({
         nodeId: node.id,
@@ -790,7 +760,6 @@ export class GitHubService {
         // A review drafted earlier counts from its submission time.
         const reviewTimestamp = review.submittedAt ?? review.createdAt;
         if (review.body !== "" && this.isWithinDateRange(reviewTimestamp)) {
-          const editHistory = toEditHistory(review.userContentEdits);
           events.push({
             type: "PullRequestReviewComment",
             createdAt: reviewTimestamp,
@@ -799,7 +768,7 @@ export class GitHubService {
             body: review.body,
             url: review.url,
             repository,
-            ...(editHistory ? { editHistory } : {}),
+            ...editHistoryField(review.userContentEdits),
           });
         }
 
@@ -810,7 +779,6 @@ export class GitHubService {
         });
         for (const comment of comments) {
           if (comment.author?.login === username && this.isWithinDateRange(comment.createdAt)) {
-            const editHistory = toEditHistory(comment.userContentEdits);
             events.push({
               type: "PullRequestReviewComment",
               createdAt: comment.createdAt,
@@ -819,7 +787,7 @@ export class GitHubService {
               body: comment.body,
               url: comment.url,
               repository,
-              ...(editHistory ? { editHistory } : {}),
+              ...editHistoryField(comment.userContentEdits),
             });
           }
         }
@@ -862,38 +830,30 @@ export class GitHubService {
     }
 
     if (this.branches === "all") {
-      let after: string | null = null;
-      let hasNext = true;
-      while (hasNext) {
-        const response: PushedRepositoriesResponse = await this.execute<PushedRepositoriesResponse>(
-          PUSHED_REPOSITORIES_QUERY,
-          {
-            login: username,
-            first: 50,
-            after,
-          },
-        );
-        const connection = response.user?.repositories;
-        if (!connection) break;
-        let reachedOlder = false;
-        for (const node of connection.nodes) {
+      const pushedPages = paginate({
+        fetchPage: async (after) => {
+          const response = await this.execute<PushedRepositoriesResponse>(
+            PUSHED_REPOSITORIES_QUERY,
+            {
+              login: username,
+              first: 50,
+              after,
+            },
+          );
+          return response.user?.repositories;
+        },
+      });
+      pages: for await (const nodes of pushedPages) {
+        for (const node of nodes) {
           // The ordering of never-pushed repositories under PUSHED_AT DESC is
           // not specified, so a null pushedAt is skipped rather than treated
           // as an early-stop signal.
           if (node.pushedAt === null) continue;
-          if (new Date(node.pushedAt) < this.since) {
-            reachedOlder = true;
-            break;
-          }
+          if (new Date(node.pushedAt) < this.since) break pages;
           if (this.matchesVisibility(node.visibility)) {
             repoMap.set(`${node.owner.login}/${node.name}`, node.visibility);
           }
         }
-        hasNext =
-          !reachedOlder &&
-          connection.pageInfo.hasNextPage &&
-          connection.pageInfo.endCursor !== null;
-        after = connection.pageInfo.endCursor;
       }
     }
 
@@ -924,10 +884,7 @@ export class GitHubService {
         authorId: params.authorId,
       };
 
-      let history: {
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
-        nodes: CommitHistoryNode[];
-      };
+      let history: Connection<CommitHistoryNode>;
       if (params.branch === null) {
         const response: CommitHistoryResponse = await this.execute<CommitHistoryResponse>(
           COMMIT_HISTORY_QUERY,
@@ -958,18 +915,19 @@ export class GitHubService {
 
   private async listBranches(params: { owner: string; name: string }): Promise<string[]> {
     const branches: string[] = [];
-    let after: string | null = null;
-    let hasNext = true;
-    while (hasNext) {
-      const response: BranchRefsResponse = await this.execute<BranchRefsResponse>(
-        BRANCH_REFS_QUERY,
-        { owner: params.owner, name: params.name, first: 100, after },
-      );
-      const refs = response.repository?.refs;
-      if (!refs) break;
-      branches.push(...refs.nodes.map((node) => node.name));
-      hasNext = refs.pageInfo.hasNextPage && refs.pageInfo.endCursor !== null;
-      after = refs.pageInfo.endCursor;
+    const refPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<BranchRefsResponse>(BRANCH_REFS_QUERY, {
+          owner: params.owner,
+          name: params.name,
+          first: 100,
+          after,
+        });
+        return response.repository?.refs;
+      },
+    });
+    for await (const nodes of refPages) {
+      branches.push(...nodes.map((node) => node.name));
     }
     return branches;
   }
@@ -1062,40 +1020,33 @@ export class GitHubService {
 
   private async fetchCommitComments(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const commentPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<CommitCommentsResponse>(COMMIT_COMMENTS_QUERY, {
+          login: username,
+          first: 100,
+          after,
+        });
+        return response.user?.commitComments;
+      },
+    });
 
     // The commitComments connection has no orderBy, so every page is scanned
     // and filtered by the date range.
-    while (hasNext) {
-      const response: CommitCommentsResponse = await this.execute<CommitCommentsResponse>(
-        COMMIT_COMMENTS_QUERY,
-        { login: username, first: 100, after },
-      );
-      const connection = response.user?.commitComments;
-      if (!connection) break;
-
-      for (const node of connection.nodes) {
+    for await (const nodes of commentPages) {
+      for (const node of nodes) {
         if (!this.matchesVisibility(node.repository.visibility)) continue;
         if (!this.isWithinDateRange(node.createdAt)) continue;
-        const editHistory = toEditHistory(node.userContentEdits);
         events.push({
           type: "CommitComment",
           createdAt: node.createdAt,
           body: node.body,
           url: node.url,
           commitOid: node.commit?.oid ?? null,
-          repository: {
-            owner: node.repository.owner.login,
-            name: node.repository.name,
-            visibility: node.repository.visibility,
-          },
-          ...(editHistory ? { editHistory } : {}),
+          repository: toEventRepository(node.repository),
+          ...editHistoryField(node.userContentEdits),
         });
       }
-
-      hasNext = connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
@@ -1120,26 +1071,22 @@ export class GitHubService {
 
   private async collectGists(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const gistPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<GistsResponse>(GISTS_QUERY, {
+          login: username,
+          first: 100,
+          after,
+        });
+        return response.user?.gists;
+      },
+    });
 
-    while (hasNext) {
-      const response: GistsResponse = await this.execute<GistsResponse>(GISTS_QUERY, {
-        login: username,
-        first: 100,
-        after,
-      });
-      const connection = response.user?.gists;
-      if (!connection) break;
-
-      // Newest first: everything after the first gist older than --since is
-      // out of range too.
-      let reachedOlder = false;
-      for (const node of connection.nodes) {
-        if (new Date(node.createdAt) < this.since) {
-          reachedOlder = true;
-          break;
-        }
+    pages: for await (const nodes of gistPages) {
+      for (const node of nodes) {
+        // Newest first: everything after the first gist older than --since is
+        // out of range too.
+        if (new Date(node.createdAt) < this.since) break pages;
         // Secret gists group with private repositories.
         const visibility: RepositoryVisibility = node.isPublic ? "PUBLIC" : "PRIVATE";
         if (!this.matchesVisibility(visibility)) continue;
@@ -1159,10 +1106,6 @@ export class GitHubService {
           },
         });
       }
-
-      hasNext =
-        !reachedOlder && connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
@@ -1178,20 +1121,27 @@ export class GitHubService {
     if (!this.matchesVisibility(repo.visibility)) return [];
 
     const events: GitHubEvent[] = [];
-    let connection: ReleasesConnection = repo.releases;
+    const releasePages = paginate({
+      first: repo.releases,
+      fetchPage: async (after) => {
+        const response = await this.execute<ReleasesPageResponse>(RELEASES_PAGE_QUERY, {
+          owner: repo.owner.login,
+          name: repo.name,
+          first: 25,
+          after,
+        });
+        return response.repository?.releases;
+      },
+    });
 
-    for (;;) {
-      let reachedOlder = false;
-      for (const release of connection.nodes) {
+    pages: for await (const releases of releasePages) {
+      for (const release of releases) {
         // The connection is ordered by creation time, so the early stop must
         // use createdAt; the range check uses the publication time so a
         // release drafted earlier still counts from when it went live.
         // (A release drafted before --since and published inside the range is
         // missed by the early stop; documented in the README.)
-        if (new Date(release.createdAt) < this.since) {
-          reachedOlder = true;
-          break;
-        }
+        if (new Date(release.createdAt) < this.since) break pages;
         if (release.author?.login !== username) continue;
         const releaseTimestamp = release.publishedAt ?? release.createdAt;
         if (!this.isWithinDateRange(releaseTimestamp)) continue;
@@ -1210,28 +1160,9 @@ export class GitHubService {
             size: asset.size,
             contentType: asset.contentType,
           })),
-          repository: {
-            owner: repo.owner.login,
-            name: repo.name,
-            visibility: repo.visibility,
-          },
+          repository: toEventRepository(repo),
         });
       }
-
-      if (reachedOlder || !connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
-        break;
-      }
-      const response: ReleasesPageResponse = await this.execute<ReleasesPageResponse>(
-        RELEASES_PAGE_QUERY,
-        {
-          owner: repo.owner.login,
-          name: repo.name,
-          first: 25,
-          after: connection.pageInfo.endCursor,
-        },
-      );
-      if (!response.repository) break;
-      connection = response.repository.releases;
     }
 
     return events;
@@ -1242,25 +1173,20 @@ export class GitHubService {
   // (documented in the README).
   private async fetchReleases(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const repositoryPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<RepositoriesWithReleasesResponse>(
+          REPOSITORIES_WITH_RELEASES_QUERY,
+          { login: username, first: 50, after },
+        );
+        return response.user?.repositories;
+      },
+    });
 
-    while (hasNext) {
-      const response: RepositoriesWithReleasesResponse =
-        await this.execute<RepositoriesWithReleasesResponse>(REPOSITORIES_WITH_RELEASES_QUERY, {
-          login: username,
-          first: 50,
-          after,
-        });
-      const connection = response.user?.repositories;
-      if (!connection) break;
-
-      for (const repo of connection.nodes) {
+    for await (const repos of repositoryPages) {
+      for (const repo of repos) {
         events.push(...(await this.collectRepositoryReleases({ repo, username })));
       }
-
-      hasNext = connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;
@@ -1268,28 +1194,24 @@ export class GitHubService {
 
   private async fetchCreatedRepositories(username: string): Promise<GitHubEvent[]> {
     const events: GitHubEvent[] = [];
-    let after: string | null = null;
-    let hasNext = true;
+    const repositoryPages = paginate({
+      fetchPage: async (after) => {
+        const response = await this.execute<CreatedRepositoriesResponse>(
+          CREATED_REPOSITORIES_QUERY,
+          {
+            login: username,
+            first: 50,
+            after,
+          },
+        );
+        return response.user?.repositories;
+      },
+    });
 
-    while (hasNext) {
-      const response: CreatedRepositoriesResponse = await this.execute<CreatedRepositoriesResponse>(
-        CREATED_REPOSITORIES_QUERY,
-        {
-          login: username,
-          first: 50,
-          after,
-        },
-      );
-      const connection = response.user?.repositories;
-      if (!connection) break;
-
-      // Newest first: stop at the first repository created before --since.
-      let reachedOlder = false;
-      for (const node of connection.nodes) {
-        if (new Date(node.createdAt) < this.since) {
-          reachedOlder = true;
-          break;
-        }
+    pages: for await (const nodes of repositoryPages) {
+      for (const node of nodes) {
+        // Newest first: stop at the first repository created before --since.
+        if (new Date(node.createdAt) < this.since) break pages;
         if (!this.matchesVisibility(node.visibility)) continue;
         if (!this.isWithinDateRange(node.createdAt)) continue;
         events.push({
@@ -1299,17 +1221,9 @@ export class GitHubService {
           description: node.description,
           isFork: node.isFork,
           readme: node.object?.text ?? null,
-          repository: {
-            owner: node.owner.login,
-            name: node.name,
-            visibility: node.visibility,
-          },
+          repository: toEventRepository(node),
         });
       }
-
-      hasNext =
-        !reachedOlder && connection.pageInfo.hasNextPage && connection.pageInfo.endCursor !== null;
-      after = connection.pageInfo.endCursor;
     }
 
     return events;

@@ -94,6 +94,36 @@ describe("writeEventsToFiles", () => {
     expect(files).toEqual([output]);
   });
 
+  it("keeps an oversized event in its own file and numbers the chunks in order", async () => {
+    const huge: GitHubEvent = {
+      type: "Issue",
+      createdAt: "2024-01-02T00:00:00Z",
+      title: "Huge issue",
+      url: "https://github.com/owner/repo/issues/2",
+      body: "x".repeat(2000),
+      repository: { owner: "owner", name: "repo", visibility: "PUBLIC" },
+    };
+    const events = [huge, makeEvent(1), huge, makeEvent(3), makeEvent(4)];
+    const output = join(tempDir, "events.json");
+    const pairSize = Buffer.byteLength(
+      JSON.stringify([makeEvent(3), makeEvent(4)], null, 2),
+      "utf-8",
+    );
+
+    const files = await writeEventsToFiles({ events, output, maxLengthSize: pairSize });
+
+    expect(files).toEqual(
+      [1, 2, 3, 4].map((index) => join(tempDir, `events_${String(index)}.json`)),
+    );
+    const chunks = await Promise.all(
+      files.map(async (file) => JSON.parse(await readFile(file, "utf-8")) as GitHubEvent[]),
+    );
+    expect(chunks).toEqual([[huge], [makeEvent(1)], [huge], [makeEvent(3), makeEvent(4)]]);
+    expect(await readFile(files[3]!, "utf-8")).toBe(
+      JSON.stringify([makeEvent(3), makeEvent(4)], null, 2),
+    );
+  });
+
   it("handles empty events array", async () => {
     const output = join(tempDir, "events.json");
     const files = await writeEventsToFiles({

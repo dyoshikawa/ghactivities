@@ -62,7 +62,6 @@
 		"@ai-sdk/openai": "4.0.9",
 		"@clack/prompts": "1.0.0",
 		"@octokit/graphql": "9.0.3",
-		"@octokit/rest": "22.0.1",
 		"@openrouter/ai-sdk-provider": "3.0.0",
 		"ai": "7.0.18",
 		"js-tiktoken": "^1.0.21",

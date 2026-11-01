@@ -19,194 +19,111 @@ const CONTENT_EDIT_FIELDS = `
   }
 `;
 
-export const ISSUE_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
-    search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
-      issueCount
+const REPOSITORY_FIELDS = `
+  repository {
+    owner { login }
+    name
+    visibility
+  }
+`;
+
+// The fields read from every issue, discussion, pull request and review
+// comment, whether it comes embedded in a search result or from a page query.
+const COMMENT_FIELDS = `
+  body
+  url
+  createdAt
+  author { login }
+  ${CONTENT_EDIT_FIELDS}
+`;
+
+// The skeleton shared by every search: the total count field the result cap
+// detection relies on, the page info, and the per-type node fields.
+const buildSearchQuery = (params: {
+  type: "ISSUE" | "DISCUSSION";
+  typename: "Issue" | "Discussion" | "PullRequest";
+  fields: string;
+  extraVariables?: string;
+}): string => `
+  query ($searchQuery: String!, $first: Int!, $after: String${params.extraVariables ? `, ${params.extraVariables}` : ""}) {
+    search(type: ${params.type}, query: $searchQuery, first: $first, after: $after) {
+      ${params.type === "ISSUE" ? "issueCount" : "discussionCount"}
       pageInfo {
         hasNextPage
         endCursor
       }
       nodes {
-        ... on Issue {
-          title
-          url
-          body
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
+        ... on ${params.typename} {
+          ${params.fields}
         }
       }
     }
   }
 `;
 
-export const ISSUE_COMMENT_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
-    search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
-      issueCount
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-      nodes {
-        ... on Issue {
-          id
-          title
-          url
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-          comments(first: 100) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              body
-              url
-              createdAt
-              author { login }
-              ${CONTENT_EDIT_FIELDS}
-            }
-          }
-        }
-      }
+// Issues, discussions and pull requests the user opened.
+const AUTHORED_ITEM_FIELDS = `
+  title
+  url
+  body
+  createdAt
+  ${REPOSITORY_FIELDS}
+`;
+
+// Items surfaced by a commenter search, with their first 100 comments; the
+// tails are fetched through the comment page queries below.
+const COMMENTED_ITEM_FIELDS = `
+  id
+  title
+  url
+  createdAt
+  ${REPOSITORY_FIELDS}
+  comments(first: 100) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      ${COMMENT_FIELDS}
     }
   }
 `;
 
-export const DISCUSSION_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
-    search(type: DISCUSSION, query: $searchQuery, first: $first, after: $after) {
-      discussionCount
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-      nodes {
-        ... on Discussion {
-          title
-          url
-          body
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-        }
-      }
-    }
-  }
-`;
+export const ISSUE_SEARCH_QUERY = buildSearchQuery({
+  type: "ISSUE",
+  typename: "Issue",
+  fields: AUTHORED_ITEM_FIELDS,
+});
 
-export const DISCUSSION_COMMENT_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
-    search(type: DISCUSSION, query: $searchQuery, first: $first, after: $after) {
-      discussionCount
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-      nodes {
-        ... on Discussion {
-          id
-          title
-          url
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-          comments(first: 100) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              body
-              url
-              createdAt
-              author { login }
-              ${CONTENT_EDIT_FIELDS}
-            }
-          }
-        }
-      }
-    }
-  }
-`;
+export const ISSUE_COMMENT_SEARCH_QUERY = buildSearchQuery({
+  type: "ISSUE",
+  typename: "Issue",
+  fields: COMMENTED_ITEM_FIELDS,
+});
 
-export const PULL_REQUEST_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
-    search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
-      issueCount
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-      nodes {
-        ... on PullRequest {
-          title
-          url
-          body
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-        }
-      }
-    }
-  }
-`;
+export const DISCUSSION_SEARCH_QUERY = buildSearchQuery({
+  type: "DISCUSSION",
+  typename: "Discussion",
+  fields: AUTHORED_ITEM_FIELDS,
+});
 
-export const PULL_REQUEST_COMMENT_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String) {
-    search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
-      issueCount
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-      nodes {
-        ... on PullRequest {
-          id
-          title
-          url
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-          comments(first: 100) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              body
-              url
-              createdAt
-              author { login }
-              ${CONTENT_EDIT_FIELDS}
-            }
-          }
-        }
-      }
-    }
-  }
-`;
+export const DISCUSSION_COMMENT_SEARCH_QUERY = buildSearchQuery({
+  type: "DISCUSSION",
+  typename: "Discussion",
+  fields: COMMENTED_ITEM_FIELDS,
+});
+
+export const PULL_REQUEST_SEARCH_QUERY = buildSearchQuery({
+  type: "ISSUE",
+  typename: "PullRequest",
+  fields: AUTHORED_ITEM_FIELDS,
+});
+
+export const PULL_REQUEST_COMMENT_SEARCH_QUERY = buildSearchQuery({
+  type: "ISSUE",
+  typename: "PullRequest",
+  fields: COMMENTED_ITEM_FIELDS,
+});
 
 // Fetches the next pages of a comment connection for a single issue,
 // discussion, or pull request surfaced by a comment search whose first 100
@@ -223,11 +140,7 @@ const buildCommentsPageQuery = (
             endCursor
           }
           nodes {
-            body
-            url
-            createdAt
-            author { login }
-            ${CONTENT_EDIT_FIELDS}
+            ${COMMENT_FIELDS}
           }
         }
       }
@@ -262,48 +175,32 @@ const REVIEW_FIELDS = `
       endCursor
     }
     nodes {
-      body
-      url
-      createdAt
-      author { login }
-      ${CONTENT_EDIT_FIELDS}
+      ${COMMENT_FIELDS}
     }
   }
 `;
 
-export const PULL_REQUEST_REVIEW_SEARCH_QUERY = `
-  query ($searchQuery: String!, $first: Int!, $after: String, $reviewAuthor: String!) {
-    search(type: ISSUE, query: $searchQuery, first: $first, after: $after) {
-      issueCount
+export const PULL_REQUEST_REVIEW_SEARCH_QUERY = buildSearchQuery({
+  type: "ISSUE",
+  typename: "PullRequest",
+  extraVariables: "$reviewAuthor: String!",
+  fields: `
+    id
+    title
+    url
+    createdAt
+    ${REPOSITORY_FIELDS}
+    reviews(first: 25, states: ${REVIEW_STATES}, author: $reviewAuthor) {
       pageInfo {
         hasNextPage
         endCursor
       }
       nodes {
-        ... on PullRequest {
-          id
-          title
-          url
-          createdAt
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-          reviews(first: 25, states: ${REVIEW_STATES}, author: $reviewAuthor) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-${REVIEW_FIELDS}
-            }
-          }
-        }
+        ${REVIEW_FIELDS}
       }
     }
-  }
-`;
+  `,
+});
 
 export const REVIEWS_PAGE_QUERY = `
   query ($nodeId: ID!, $first: Int!, $after: String!, $reviewAuthor: String!) {
@@ -328,26 +225,7 @@ export const CONTRIBUTIONS_COLLECTION_QUERY = `
     user(login: $login) {
       contributionsCollection(from: $from, to: $to) {
         commitContributionsByRepository {
-          repository {
-            owner { login }
-            name
-            visibility
-          }
-          contributions(first: 100) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              occurredAt
-              commitCount
-              repository {
-                owner { login }
-                name
-                visibility
-              }
-            }
-          }
+          ${REPOSITORY_FIELDS}
         }
       }
     }
@@ -473,11 +351,7 @@ export const COMMIT_COMMENTS_QUERY = `
           url
           createdAt
           commit { oid }
-          repository {
-            owner { login }
-            name
-            visibility
-          }
+          ${REPOSITORY_FIELDS}
           ${CONTENT_EDIT_FIELDS}
         }
       }
