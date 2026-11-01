@@ -39,7 +39,6 @@ import type {
   ViewerResponse,
 } from "../types/github-api.js";
 import type { DateRange } from "../utils/date-range.js";
-
 import {
   spansMultipleUtcDays,
   splitDateRangeAtUtcDayBoundary,

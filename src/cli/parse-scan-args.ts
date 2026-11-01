@@ -1,4 +1,5 @@
 import { parseArgs as nodeParseArgs } from "node:util";
+
 import { z } from "zod/mini";
 
 import type { ScanConfig, ScanOptions, ScanProvider } from "../types/scan.js";

@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach } from "vitest";
+
+import { afterEach, beforeEach } from "vite-plus/test";
 
 const execFileAsync = promisify(execFile);
 

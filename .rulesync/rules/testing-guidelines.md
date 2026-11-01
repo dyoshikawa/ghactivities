@@ -10,7 +10,7 @@ globs: ["**/*.test.ts", "src/e2e/**/*.spec.ts"]
 ## Unit tests
 
 - Unit test files use the `*.test.ts` suffix and are placed next to the implementation (the co-location pattern). For example, the test for `src/cli/parse-args.ts` is `src/cli/parse-args.test.ts`.
-- Run unit tests with `pnpm run test` (Vitest). They must not access the network or write to the filesystem outside a temporary directory.
+- Run unit tests with `pnpm run test` (Vitest through `vp test`, configured by `vitest.config.ts`); import test APIs from `vite-plus/test`. They must not access the network or write to the filesystem outside a temporary directory.
 
 ## E2E tests
 

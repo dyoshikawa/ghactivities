@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { computeRetryDelayMs, GitHubService } from "./github.js";
 
@@ -61,49 +61,52 @@ const {
   restFailureQueue: [] as { status: number; body: unknown }[],
 }));
 
+// Helpers of the @octokit/graphql stub below. They are function declarations
+// so that they are hoisted along with the (hoisted) vi.mock factory that
+// calls them.
+function findInjectedFailure(query: string, variables: Record<string, unknown>) {
+  const failureKey = `${query} ${String(variables.searchQuery ?? "")} after:${String(variables.after ?? "")}`;
+  for (const [substring, errors] of failures) {
+    if (errors.length > 0 && failureKey.includes(substring)) {
+      return errors.shift();
+    }
+  }
+  return undefined;
+}
+
+// Nested pagination: serves the review or comment page registered for the
+// requested cursor.
+function handleNodePage(query: string, variables: Record<string, unknown>) {
+  if (query.includes("reviews(first:")) {
+    const page = reviewPagesByCursor.get(String(variables.after ?? ""));
+    return { node: page ? { reviews: page } : null };
+  }
+  const page = commentPagesByCursor.get(String(variables.after ?? ""));
+  return { node: page ? { comments: page } : null };
+}
+
+function handleSearch(variables: Record<string, unknown>) {
+  const searchQuery = String(variables.searchQuery ?? "");
+  const preset = searchResponsesByQuery.get(searchQuery);
+  if (preset) return { search: preset };
+  let nodes: unknown[] = [];
+  for (const [qualifiers, qualifierNodes] of searchNodesByQualifiers) {
+    if (searchQuery.startsWith(`${qualifiers} `)) nodes = qualifierNodes;
+  }
+  if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
+    nodes = issueCommentSearchNodes;
+  }
+  if (searchQuery.includes("reviewed-by:")) {
+    nodes = reviewSearchNodes;
+  }
+  return {
+    search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+  };
+}
+
 // Mock @octokit/graphql with a stub that returns empty-but-valid shapes for
 // each query the service issues, and records the (query, variables) pairs.
 vi.mock("@octokit/graphql", () => {
-  const findInjectedFailure = (query: string, variables: Record<string, unknown>) => {
-    const failureKey = `${query} ${String(variables.searchQuery ?? "")} after:${String(variables.after ?? "")}`;
-    for (const [substring, errors] of failures) {
-      if (errors.length > 0 && failureKey.includes(substring)) {
-        return errors.shift();
-      }
-    }
-    return undefined;
-  };
-
-  // Nested pagination: serves the review or comment page registered for the
-  // requested cursor.
-  const handleNodePage = (query: string, variables: Record<string, unknown>) => {
-    if (query.includes("reviews(first:")) {
-      const page = reviewPagesByCursor.get(String(variables.after ?? ""));
-      return { node: page ? { reviews: page } : null };
-    }
-    const page = commentPagesByCursor.get(String(variables.after ?? ""));
-    return { node: page ? { comments: page } : null };
-  };
-
-  const handleSearch = (variables: Record<string, unknown>) => {
-    const searchQuery = String(variables.searchQuery ?? "");
-    const preset = searchResponsesByQuery.get(searchQuery);
-    if (preset) return { search: preset };
-    let nodes: unknown[] = [];
-    for (const [qualifiers, qualifierNodes] of searchNodesByQualifiers) {
-      if (searchQuery.startsWith(`${qualifiers} `)) nodes = qualifierNodes;
-    }
-    if (searchQuery.includes("commenter:") && searchQuery.includes("is:issue")) {
-      nodes = issueCommentSearchNodes;
-    }
-    if (searchQuery.includes("reviewed-by:")) {
-      nodes = reviewSearchNodes;
-    }
-    return {
-      search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes },
-    };
-  };
-
   const noNextPage = { hasNextPage: false, endCursor: null };
 
   const connection = (kind: string, variables: Record<string, unknown>, nodes: unknown[]) =>
@@ -685,25 +688,25 @@ const visibilityNode = (visibility: string) => ({
   repository: { owner: { login: "owner" }, name: "repo", visibility },
 });
 
+const setIssueSearchNodes = (nodes: unknown[]) => {
+  searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
+    issueCount: nodes.length,
+    pageInfo: { hasNextPage: false, endCursor: null },
+    nodes,
+  });
+};
+
+const collectIssueTitles = async (visibility: "public" | "private" | "all") => {
+  setIssueSearchNodes([
+    visibilityNode("PUBLIC"),
+    visibilityNode("PRIVATE"),
+    visibilityNode("INTERNAL"),
+  ]);
+  const events = await makeService({ visibility }).fetchAllEvents();
+  return events.filter((event) => event.type === "Issue").map((e) => e.title);
+};
+
 describe("repository visibility filtering", () => {
-  const setIssueSearchNodes = (nodes: unknown[]) => {
-    searchResponsesByQuery.set("author:testuser is:issue created:2024-01-01..2024-01-15", {
-      issueCount: nodes.length,
-      pageInfo: { hasNextPage: false, endCursor: null },
-      nodes,
-    });
-  };
-
-  const collectIssueTitles = async (visibility: "public" | "private" | "all") => {
-    setIssueSearchNodes([
-      visibilityNode("PUBLIC"),
-      visibilityNode("PRIVATE"),
-      visibilityNode("INTERNAL"),
-    ]);
-    const events = await makeService({ visibility }).fetchAllEvents();
-    return events.filter((event) => event.type === "Issue").map((e) => e.title);
-  };
-
   it("includes only PUBLIC repositories with --visibility public", async () => {
     expect(await collectIssueTitles("public")).toEqual(["PUBLIC issue"]);
   });
@@ -1877,11 +1880,21 @@ const pushedRepo = (name: string, pushedAt: string) => ({
   pushedAt,
 });
 
-describe("connection pagination", () => {
-  const repoNode = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
-  const afterCursors = (marker: string) =>
-    calls.filter((call) => call.query.includes(marker)).map((call) => call.variables.after);
+const repoNode = { owner: { login: "owner" }, name: "repo", visibility: "PUBLIC" };
 
+const afterCursors = (marker: string) =>
+  calls.filter((call) => call.query.includes(marker)).map((call) => call.variables.after);
+
+const commitCommentNode = (body: string) => ({
+  body,
+  url: `https://github.com/owner/repo/commit/abc#${body}`,
+  createdAt: "2024-01-05T00:00:00Z",
+  commit: { oid: "abc" },
+  repository: repoNode,
+  userContentEdits: null,
+});
+
+describe("connection pagination", () => {
   it("pages gists and stops at the first one older than --since", async () => {
     connectionPages.set("gists:", connectionPage([gistNode("g1", "2024-01-10T00:00:00Z")], "G2"));
     connectionPages.set(
@@ -1901,16 +1914,8 @@ describe("connection pagination", () => {
   });
 
   it("pages every commit comment page", async () => {
-    const comment = (body: string) => ({
-      body,
-      url: `https://github.com/owner/repo/commit/abc#${body}`,
-      createdAt: "2024-01-05T00:00:00Z",
-      commit: { oid: "abc" },
-      repository: repoNode,
-      userContentEdits: null,
-    });
-    connectionPages.set("commitComments:", connectionPage([comment("c1")], "C2"));
-    connectionPages.set("commitComments:C2", connectionPage([comment("c2")], null));
+    connectionPages.set("commitComments:", connectionPage([commitCommentNode("c1")], "C2"));
+    connectionPages.set("commitComments:C2", connectionPage([commitCommentNode("c2")], null));
 
     const events = await makeService().fetchAllEvents();
 
