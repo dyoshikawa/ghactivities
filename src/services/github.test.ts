@@ -1276,6 +1276,84 @@ describe("audit event collection", () => {
     ]);
   });
 
+  it("excludes draft releases under --visibility public but keeps them with all", async () => {
+    releaseRepoNodes.push({
+      owner: { login: "testuser" },
+      name: "repo",
+      visibility: "PUBLIC",
+      releases: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            name: "unannounced",
+            tagName: "v2.0.0",
+            url: "https://github.com/testuser/repo/releases/tag/untagged-1",
+            createdAt: "2024-01-10T00:00:00Z",
+            publishedAt: null,
+            description: "secret notes",
+            isPrerelease: false,
+            isDraft: true,
+            author: { login: "testuser" },
+            releaseAssets: { nodes: [] },
+          },
+          {
+            name: "announced",
+            tagName: "v1.9.0",
+            url: "https://github.com/testuser/repo/releases/tag/v1.9.0",
+            createdAt: "2024-01-09T00:00:00Z",
+            publishedAt: "2024-01-09T00:00:00Z",
+            description: null,
+            isPrerelease: false,
+            isDraft: false,
+            author: { login: "testuser" },
+            releaseAssets: { nodes: [] },
+          },
+        ],
+      },
+    });
+    releaseRepoNodes.push({
+      owner: { login: "testuser" },
+      name: "private-repo",
+      visibility: "PRIVATE",
+      releases: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            name: "private draft",
+            tagName: "v0.2.0",
+            url: "https://github.com/testuser/private-repo/releases/tag/untagged-2",
+            createdAt: "2024-01-10T00:00:00Z",
+            publishedAt: null,
+            description: null,
+            isPrerelease: false,
+            isDraft: true,
+            author: { login: "testuser" },
+            releaseAssets: { nodes: [] },
+          },
+        ],
+      },
+    });
+
+    const publicReleases = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "Release",
+    );
+    expect(publicReleases).toMatchObject([{ tagName: "v1.9.0", isDraft: false }]);
+
+    const privateReleases = (await makeService({ visibility: "private" }).fetchAllEvents()).filter(
+      (event) => event.type === "Release",
+    );
+    expect(privateReleases).toMatchObject([{ tagName: "v0.2.0", isDraft: true }]);
+
+    const allReleases = (await makeService({ visibility: "all" }).fetchAllEvents()).filter(
+      (event) => event.type === "Release",
+    );
+    expect(allReleases.map((event) => (event.type === "Release" ? event.tagName : null))).toEqual([
+      "v2.0.0",
+      "v1.9.0",
+      "v0.2.0",
+    ]);
+  });
+
   it("collects repositories created within the range including their README", async () => {
     createdRepoNodes.push(
       {
