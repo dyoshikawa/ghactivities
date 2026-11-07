@@ -65,7 +65,7 @@
 		"@openrouter/ai-sdk-provider": "3.0.0",
 		"ai": "7.0.18",
 		"js-tiktoken": "^1.0.21",
-		"zod": "4.3.6"
+		"zod": "4.6.6"
 	},
 	"devDependencies": {
 		"@secretlint/secretlint-rule-preset-recommend": "11.3.1",
