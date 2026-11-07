@@ -1143,6 +1143,9 @@ export class GitHubService {
         // missed by the early stop; documented in the README.)
         if (new Date(release.createdAt) < this.since) break pages;
         if (release.author?.login !== username) continue;
+        // A draft is visible only to users with push access, so it is not
+        // public content even in a public repository (like pending reviews).
+        if (release.isDraft && this.visibility === "public") continue;
         const releaseTimestamp = release.publishedAt ?? release.createdAt;
         if (!this.isWithinDateRange(releaseTimestamp)) continue;
         events.push({

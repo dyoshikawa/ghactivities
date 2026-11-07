@@ -1276,6 +1276,41 @@ describe("audit event collection", () => {
     ]);
   });
 
+  it("excludes draft releases under --visibility public but keeps them with all", async () => {
+    releaseRepoNodes.push({
+      owner: { login: "testuser" },
+      name: "repo",
+      visibility: "PUBLIC",
+      releases: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          {
+            name: "unannounced",
+            tagName: "v2.0.0",
+            url: "https://github.com/testuser/repo/releases/tag/untagged-1",
+            createdAt: "2024-01-10T00:00:00Z",
+            publishedAt: null,
+            description: "secret notes",
+            isPrerelease: false,
+            isDraft: true,
+            author: { login: "testuser" },
+            releaseAssets: { nodes: [] },
+          },
+        ],
+      },
+    });
+
+    const publicReleases = (await makeService().fetchAllEvents()).filter(
+      (event) => event.type === "Release",
+    );
+    expect(publicReleases).toEqual([]);
+
+    const allReleases = (await makeService({ visibility: "all" }).fetchAllEvents()).filter(
+      (event) => event.type === "Release",
+    );
+    expect(allReleases).toMatchObject([{ type: "Release", tagName: "v2.0.0", isDraft: true }]);
+  });
+
   it("collects repositories created within the range including their README", async () => {
     createdRepoNodes.push(
       {
